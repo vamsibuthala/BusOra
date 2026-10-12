@@ -8,6 +8,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { Server } from 'socket.io';
 import { supabase, isSupabaseConfigured } from './supabase.js';
+import { db } from './database.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'busora-super-secret-jwt-key-2026';
 const PORT = process.env.PORT || 5000;
@@ -41,394 +42,6 @@ const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, message: { e
 const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 600 });
 app.use('/api/auth', authLimiter);
 app.use('/api', apiLimiter);
-
-// -------------------------------------------------------------
-// In-Memory Database Fallback (used if Supabase is not configured yet)
-// -------------------------------------------------------------
-let memoryStore = {
-  users: [],
-  routes: [],
-  buses: [],
-  trips: [],
-  busLocations: [],
-  notifications: [],
-};
-
-async function initInMemoryData() {
-  const adminPass = await bcrypt.hash('Admin@123', 10);
-  const driverPass = await bcrypt.hash('Driver@123', 10);
-  const studentPass = await bcrypt.hash('Student@123', 10);
-
-  const route1 = {
-    id: 'route-north-1',
-    name: 'Route A (North Campus Express)',
-    description: 'Main Campus to North City via Station',
-    active: true,
-    stops: [
-      { id: 'stop-1', name: 'Main Campus Gate', lat: 13.6288, lng: 79.4192, order: 1 },
-      { id: 'stop-2', name: 'Market Complex', lat: 13.6350, lng: 79.4250, order: 2 },
-      { id: 'stop-3', name: 'Central Railway Station', lat: 13.6420, lng: 79.4300, order: 3 },
-      { id: 'stop-4', name: 'North City Terminal', lat: 13.6510, lng: 79.4380, order: 4 },
-    ],
-  };
-
-  const route2 = {
-    id: 'route-south-2',
-    name: 'Route B (South Tech Shuttle)',
-    description: 'South Campus to Tech Park and City Mall',
-    active: true,
-    stops: [
-      { id: 'stop-5', name: 'South Campus Gate', lat: 13.6200, lng: 79.4120, order: 1 },
-      { id: 'stop-6', name: 'Tech Park Circle', lat: 13.6150, lng: 79.4050, order: 2 },
-      { id: 'stop-7', name: 'City Mall Junction', lat: 13.6080, lng: 79.3980, order: 3 },
-    ],
-  };
-
-  const bus1 = {
-    id: 'bus-01',
-    number: 'BUS-01',
-    route_id: route1.id,
-    driver_id: 'user-driver-1',
-    capacity: 45,
-    status: 'idle',
-    last_lat: 13.6288,
-    last_lng: 79.4192,
-    last_speed: 0,
-    last_location_at: new Date().toISOString(),
-    active: true,
-  };
-
-  const bus2 = {
-    id: 'bus-02',
-    number: 'BUS-02',
-    route_id: route2.id,
-    driver_id: 'user-driver-2',
-    capacity: 45,
-    status: 'idle',
-    last_lat: 13.6200,
-    last_lng: 79.4120,
-    last_speed: 0,
-    last_location_at: new Date().toISOString(),
-    active: true,
-  };
-
-  memoryStore.routes = [route1, route2];
-  memoryStore.buses = [bus1, bus2];
-
-  memoryStore.users = [
-    {
-      id: 'user-admin-1',
-      name: 'College Transport Administrator',
-      email: 'admin@busora.com',
-      password_hash: adminPass,
-      role: 'admin',
-      phone: '+91 98765 00001',
-      active: true,
-    },
-    {
-      id: 'user-driver-1',
-      name: 'Rajesh Kumar (Driver 1)',
-      email: 'driver@busora.com',
-      password_hash: driverPass,
-      role: 'driver',
-      bus_id: 'bus-01',
-      phone: '+91 98765 00002',
-      active: true,
-    },
-    {
-      id: 'user-driver-2',
-      name: 'Sunil Verma (Driver 2)',
-      email: 'driver2@busora.com',
-      password_hash: driverPass,
-      role: 'driver',
-      bus_id: 'bus-02',
-      phone: '+91 98765 00003',
-      active: true,
-    },
-    {
-      id: 'user-student-1',
-      name: 'Aarav Sharma',
-      email: 'student@busora.com',
-      password_hash: studentPass,
-      role: 'student',
-      bus_id: 'bus-01',
-      stop_id: 'stop-2',
-      phone: '+91 98765 11111',
-      active: true,
-    },
-    {
-      id: 'user-student-2',
-      name: 'Priya Patel',
-      email: 'student2@busora.com',
-      password_hash: studentPass,
-      role: 'student',
-      bus_id: 'bus-01',
-      stop_id: 'stop-3',
-      phone: '+91 98765 22222',
-      active: true,
-    },
-    {
-      id: 'user-student-3',
-      name: 'Rohan Gupta',
-      email: 'student3@busora.com',
-      password_hash: studentPass,
-      role: 'student',
-      bus_id: 'bus-02',
-      stop_id: 'stop-6',
-      phone: '+91 98765 33333',
-      active: true,
-    },
-  ];
-}
-initInMemoryData();
-
-// -------------------------------------------------------------
-// Unified Data Access Layer (Supabase vs Memory Store)
-// -------------------------------------------------------------
-const db = {
-  async findUserByEmail(email) {
-    const cleanEmail = String(email || '').trim().toLowerCase();
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.from('users').select('*').eq('email', cleanEmail).maybeSingle();
-      if (error) console.error('Supabase findUserByEmail error:', error);
-      return data;
-    }
-    return memoryStore.users.find((u) => u.email.toLowerCase() === cleanEmail && u.active);
-  },
-
-  async findUserById(id) {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('users').select('*').eq('id', id).maybeSingle();
-      return data;
-    }
-    return memoryStore.users.find((u) => u.id === id);
-  },
-
-  async getAllUsers() {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('users').select('*').order('created_at', { ascending: false });
-      return data || [];
-    }
-    return memoryStore.users;
-  },
-
-  async createUser(userData) {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.from('users').insert(userData).select().single();
-      if (error) throw error;
-      return data;
-    }
-    const newUser = { id: 'user-' + Date.now(), created_at: new Date().toISOString(), ...userData };
-    memoryStore.users.push(newUser);
-    return newUser;
-  },
-
-  async updateUser(id, updateData) {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.from('users').update(updateData).eq('id', id).select().single();
-      if (error) throw error;
-      return data;
-    }
-    const idx = memoryStore.users.findIndex((u) => u.id === id);
-    if (idx === -1) return null;
-    memoryStore.users[idx] = { ...memoryStore.users[idx], ...updateData };
-    return memoryStore.users[idx];
-  },
-
-  async deleteUser(id) {
-    if (isSupabaseConfigured) {
-      const { error } = await supabase.from('users').delete().eq('id', id);
-      if (error) throw error;
-      return true;
-    }
-    memoryStore.users = memoryStore.users.filter((u) => u.id !== id);
-    return true;
-  },
-
-  async getBuses() {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('buses').select('*, routes(*), users(name, email, phone)').order('number');
-      return (data || []).map((b) => ({
-        ...b,
-        route: b.routes,
-        driver: b.users,
-      }));
-    }
-    return memoryStore.buses.map((b) => ({
-      ...b,
-      route: memoryStore.routes.find((r) => r.id === b.route_id),
-      driver: memoryStore.users.find((u) => u.id === b.driver_id),
-    }));
-  },
-
-  async getBusById(id) {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('buses').select('*, routes(*), users(name, email, phone)').eq('id', id).maybeSingle();
-      if (!data) return null;
-      return { ...data, route: data.routes, driver: data.users };
-    }
-    const bus = memoryStore.buses.find((b) => b.id === id);
-    if (!bus) return null;
-    return {
-      ...bus,
-      route: memoryStore.routes.find((r) => r.id === bus.route_id),
-      driver: memoryStore.users.find((u) => u.id === bus.driver_id),
-    };
-  },
-
-  async getBusByDriverId(driverId) {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('buses').select('*, routes(*)').eq('driver_id', driverId).maybeSingle();
-      if (!data) return null;
-      return { ...data, route: data.routes };
-    }
-    const bus = memoryStore.buses.find((b) => b.driver_id === driverId);
-    if (!bus) return null;
-    return {
-      ...bus,
-      route: memoryStore.routes.find((r) => r.id === bus.route_id),
-    };
-  },
-
-  async updateBus(id, updateData) {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.from('buses').update(updateData).eq('id', id).select().single();
-      if (error) throw error;
-      return data;
-    }
-    const idx = memoryStore.buses.findIndex((b) => b.id === id);
-    if (idx === -1) return null;
-    memoryStore.buses[idx] = { ...memoryStore.buses[idx], ...updateData };
-    return memoryStore.buses[idx];
-  },
-
-  async getRoutes() {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('routes').select('*').order('name');
-      return data || [];
-    }
-    return memoryStore.routes;
-  },
-
-  async getActiveTripByDriver(driverId) {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('trips').select('*').eq('driver_id', driverId).eq('status', 'active').maybeSingle();
-      return data;
-    }
-    return memoryStore.trips.find((t) => t.driver_id === driverId && t.status === 'active');
-  },
-
-  async getActiveTripByBus(busId) {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('trips').select('*').eq('bus_id', busId).eq('status', 'active').maybeSingle();
-      return data;
-    }
-    return memoryStore.trips.find((t) => t.bus_id === busId && t.status === 'active');
-  },
-
-  async startTrip(busId, driverId) {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.from('trips').insert({ bus_id: busId, driver_id: driverId, status: 'active', started_at: new Date().toISOString() }).select().single();
-      if (error) throw error;
-      return data;
-    }
-    const trip = {
-      id: 'trip-' + Date.now(),
-      bus_id: busId,
-      driver_id: driverId,
-      status: 'active',
-      started_at: new Date().toISOString(),
-      incidents: [],
-    };
-    memoryStore.trips.push(trip);
-    return trip;
-  },
-
-  async endTrip(tripId) {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.from('trips').update({ status: 'completed', ended_at: new Date().toISOString() }).eq('id', tripId).select().single();
-      if (error) throw error;
-      return data;
-    }
-    const trip = memoryStore.trips.find((t) => t.id === tripId);
-    if (trip) {
-      trip.status = 'completed';
-      trip.ended_at = new Date().toISOString();
-    }
-    return trip;
-  },
-
-  async recordLocation(tripId, busId, lat, lng, speed) {
-    const at = new Date().toISOString();
-    if (isSupabaseConfigured) {
-      await supabase.from('bus_locations').insert({ trip_id: tripId, bus_id: busId, lat, lng, speed, created_at: at });
-    } else {
-      memoryStore.busLocations.push({ id: 'loc-' + Date.now(), trip_id: tripId, bus_id: busId, lat, lng, speed, created_at: at });
-    }
-  },
-
-  async addTripIncident(tripId, incident) {
-    if (isSupabaseConfigured) {
-      const { data: trip } = await supabase.from('trips').select('incidents').eq('id', tripId).single();
-      const list = Array.isArray(trip?.incidents) ? trip.incidents : [];
-      list.push(incident);
-      await supabase.from('trips').update({ incidents: list }).eq('id', tripId);
-    } else {
-      const trip = memoryStore.trips.find((t) => t.id === tripId);
-      if (trip) {
-        if (!trip.incidents) trip.incidents = [];
-        trip.incidents.push(incident);
-      }
-    }
-  },
-
-  async getRecentTrips() {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('trips').select('*, buses(number), users(name)').order('started_at', { ascending: false }).limit(50);
-      return (data || []).map((t) => ({ ...t, bus: t.buses, driver: t.users }));
-    }
-    return memoryStore.trips.slice(-50).reverse().map((t) => ({
-      ...t,
-      bus: memoryStore.buses.find((b) => b.id === t.bus_id),
-      driver: memoryStore.users.find((u) => u.id === t.driver_id),
-    }));
-  },
-
-  async getNotifications(userId) {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(30);
-      return data || [];
-    }
-    return memoryStore.notifications.filter((n) => n.user_id === userId).reverse().slice(0, 30);
-  },
-
-  async markNotificationsRead(userId) {
-    if (isSupabaseConfigured) {
-      await supabase.from('notifications').update({ read: true }).eq('user_id', userId);
-    } else {
-      memoryStore.notifications.forEach((n) => {
-        if (n.user_id === userId) n.read = true;
-      });
-    }
-  },
-
-  async createNotification(userId, busId, type, message, key) {
-    const n = {
-      user_id: userId,
-      bus_id: busId,
-      type,
-      message,
-      notification_key: key,
-      read: false,
-      created_at: new Date().toISOString(),
-    };
-    if (isSupabaseConfigured) {
-      await supabase.from('notifications').insert(n);
-    } else {
-      memoryStore.notifications.push({ id: 'notif-' + Date.now(), ...n });
-    }
-  },
-};
 
 // -------------------------------------------------------------
 // Helper functions
@@ -480,7 +93,7 @@ async function broadcastNotify(busId, type, message, key) {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    database: isSupabaseConfigured ? 'supabase-postgresql' : 'in-memory-demo',
+    database: db.getEngineName(),
     timestamp: new Date().toISOString(),
   });
 });
@@ -498,7 +111,7 @@ app.get('/api/public/summary', async (req, res) => {
     const studentsCount = allUsers.filter((u) => u.role === 'student').length;
 
     res.json({
-      database: isSupabaseConfigured ? 'supabase' : 'demo',
+      database: db.getEngineName(),
       stats: {
         totalBuses: buses.length,
         activeBuses: activeCount,
@@ -795,6 +408,7 @@ app.get('/api/admin/stats', auth('admin'), async (req, res) => {
       admins,
       activeTrips,
       routes: routes.length,
+      database: db.getEngineName(),
       isSupabase: isSupabaseConfigured,
     });
   } catch (err) {
@@ -834,8 +448,7 @@ app.get('/api/admin/trips', auth('admin'), async (req, res) => {
   }
 });
 
-// Admin User Hierarchy Management:
-// Super admin creates & configures accounts for Admins, Drivers, and Students
+// Admin User Hierarchy Management
 app.get('/api/admin/users', auth('admin'), async (req, res) => {
   try {
     const users = await db.getAllUsers();
@@ -871,7 +484,6 @@ app.post('/api/admin/users', auth('admin'), async (req, res) => {
       active: true,
     });
 
-    // If driver, assign bus
     if (role === 'driver' && bus_id) {
       await db.updateBus(bus_id, { driver_id: newUser.id });
     }
@@ -946,7 +558,7 @@ app.get('/api/admin/routes', auth('admin'), async (req, res) => {
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth?.token;
-    if (!token) return next(); // allow anonymous public sockets if needed
+    if (!token) return next();
     const payload = jwt.verify(token, JWT_SECRET);
     const user = await db.findUserById(payload.id);
     if (user && user.active) {
@@ -967,7 +579,6 @@ io.on('connection', (socket) => {
     if (user.role === 'driver' && user.bus_id) socket.join(`bus:${user.bus_id}`);
   }
 
-  // Allow anonymous joining for homepage live tracker
   socket.on('join-bus', (busId) => {
     socket.join(`bus:${busId}`);
   });
@@ -1002,5 +613,5 @@ setInterval(async () => {
 
 server.listen(PORT, () => {
   console.log(`🚀 BusOra Server running on port ${PORT}`);
-  console.log(`📡 Database mode: ${isSupabaseConfigured ? 'Supabase PostgreSQL' : 'Fast In-Memory'}`);
+  console.log(`📡 Database Engine: ${db.getEngineName()}`);
 });

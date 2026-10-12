@@ -1,0 +1,187 @@
+{
+  "users": [
+    {
+      "id": "user-1791820228316",
+      "created_at": "2026-10-12T15:50:28.316Z",
+      "updated_at": "2026-10-12T15:50:28.316Z",
+      "name": "Test New Student",
+      "email": "testnew@busora.com",
+      "password_hash": "$2a$10$6l3dTzZnWLrhp1OmEJLFcumjMLL12QRoGZoO26nf7GSFFIboKBFiG",
+      "role": "student",
+      "bus_id": "bus-01",
+      "stop_id": "stop-2",
+      "phone": "",
+      "active": true
+    },
+    {
+      "id": "user-admin-1",
+      "name": "College Transport Administrator",
+      "email": "admin@busora.com",
+      "password_hash": "$2a$10$ZmWtRuomlkz6SXe9dwCDpOm2cgXZJXyYADpZkgxwTva3H29SgRcmO",
+      "role": "admin",
+      "phone": "+91 98765 00001",
+      "active": true,
+      "created_at": "2026-10-12T15:47:16.012Z"
+    },
+    {
+      "id": "user-driver-1",
+      "name": "Rajesh Kumar (Driver 1)",
+      "email": "driver@busora.com",
+      "password_hash": "$2a$10$tn2XD60iP1iXYIMK/UL7o.opACwFXXEuZ5EzRDEt25rWNxQeDOLSy",
+      "role": "driver",
+      "bus_id": "bus-01",
+      "phone": "+91 98765 00002",
+      "active": true,
+      "created_at": "2026-10-12T15:47:16.012Z"
+    },
+    {
+      "id": "user-driver-2",
+      "name": "Sunil Verma (Driver 2)",
+      "email": "driver2@busora.com",
+      "password_hash": "$2a$10$tn2XD60iP1iXYIMK/UL7o.opACwFXXEuZ5EzRDEt25rWNxQeDOLSy",
+      "role": "driver",
+      "bus_id": "bus-02",
+      "phone": "+91 98765 00003",
+      "active": true,
+      "created_at": "2026-10-12T15:47:16.012Z"
+    },
+    {
+      "id": "user-student-1",
+      "name": "Aarav Sharma",
+      "email": "student@busora.com",
+      "password_hash": "$2a$10$BCKiKzCNSyNDfheIIEWl.uHl3jiqKz0ECg9AjNrmtIlHqXJkr.tN.",
+      "role": "student",
+      "bus_id": "bus-01",
+      "stop_id": "stop-2",
+      "phone": "+91 98765 11111",
+      "active": true,
+      "created_at": "2026-10-12T15:47:16.012Z"
+    },
+    {
+      "id": "user-student-2",
+      "name": "Priya Patel",
+      "email": "student2@busora.com",
+      "password_hash": "$2a$10$BCKiKzCNSyNDfheIIEWl.uHl3jiqKz0ECg9AjNrmtIlHqXJkr.tN.",
+      "role": "student",
+      "bus_id": "bus-01",
+      "stop_id": "stop-3",
+      "phone": "+91 98765 22222",
+      "active": true,
+      "created_at": "2026-10-12T15:47:16.012Z"
+    },
+    {
+      "id": "user-student-3",
+      "name": "Rohan Gupta",
+      "email": "student3@busora.com",
+      "password_hash": "$2a$10$BCKiKzCNSyNDfheIIEWl.uHl3jiqKz0ECg9AjNrmtIlHqXJkr.tN.",
+      "role": "student",
+      "bus_id": "bus-02",
+      "stop_id": "stop-6",
+      "phone": "+91 98765 33333",
+      "active": true,
+      "created_at": "2026-10-12T15:47:16.012Z"
+    }
+  ],
+  "routes": [
+    {
+      "id": "route-north-1",
+      "name": "Route A (North Campus Express)",
+      "description": "Main Campus to North City via Station",
+      "active": true,
+      "stops": [
+        {
+          "id": "stop-1",
+          "name": "Main Campus Gate",
+          "lat": 13.6288,
+          "lng": 79.4192,
+          "order": 1
+        },
+        {
+          "id": "stop-2",
+          "name": "Market Complex",
+          "lat": 13.635,
+          "lng": 79.425,
+          "order": 2
+        },
+        {
+          "id": "stop-3",
+          "name": "Central Railway Station",
+          "lat": 13.642,
+          "lng": 79.43,
+          "order": 3
+        },
+        {
+          "id": "stop-4",
+          "name": "North City Terminal",
+          "lat": 13.651,
+          "lng": 79.438,
+          "order": 4
+        }
+      ],
+      "created_at": "2026-10-12T15:47:16.002Z"
+    },
+    {
+      "id": "route-south-2",
+      "name": "Route B (South Tech Shuttle)",
+      "description": "South Campus to Tech Park and City Mall",
+      "active": true,
+      "stops": [
+        {
+          "id": "stop-5",
+          "name": "South Campus Gate",
+          "lat": 13.62,
+          "lng": 79.412,
+          "order": 1
+        },
+        {
+          "id": "stop-6",
+          "name": "Tech Park Circle",
+          "lat": 13.615,
+          "lng": 79.405,
+          "order": 2
+        },
+        {
+          "id": "stop-7",
+          "name": "City Mall Junction",
+          "lat": 13.608,
+          "lng": 79.398,
+          "order": 3
+        }
+      ],
+      "created_at": "2026-10-12T15:47:16.012Z"
+    }
+  ],
+  "buses": [
+    {
+      "id": "bus-01",
+      "number": "BUS-01",
+      "route_id": "route-north-1",
+      "driver_id": "user-driver-1",
+      "capacity": 45,
+      "status": "idle",
+      "last_lat": 13.6288,
+      "last_lng": 79.4192,
+      "last_speed": 0,
+      "last_location_at": "2026-10-12T15:47:16.012Z",
+      "active": true,
+      "created_at": "2026-10-12T15:47:16.012Z"
+    },
+    {
+      "id": "bus-02",
+      "number": "BUS-02",
+      "route_id": "route-south-2",
+      "driver_id": "user-driver-2",
+      "capacity": 45,
+      "status": "idle",
+      "last_lat": 13.62,
+      "last_lng": 79.412,
+      "last_speed": 0,
+      "last_location_at": "2026-10-12T15:47:16.012Z",
+      "active": true,
+      "created_at": "2026-10-12T15:47:16.012Z"
+    }
+  ],
+  "trips": [],
+  "bus_locations": [],
+  "notifications": []
+}

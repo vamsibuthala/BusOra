@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "seed": "node src/seed-supabase.js"
+    "seed": "node src/seed-supabase.js",
+    "test:db": "node src/test-supabase.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
