@@ -41,37 +41,10 @@ async function initLocalStore() {
   const driverPass = await bcrypt.hash('Driver@123', 10);
   const studentPass = await bcrypt.hash('Student@123', 10);
 
-  const route1 = {
-    id: 'route-north-1',
-    name: 'Route A (North Campus Express)',
-    description: 'Main Campus to North City via Station',
-    active: true,
-    stops: [
-      { id: 'stop-1', name: 'Main Campus Gate', lat: 13.6288, lng: 79.4192, order: 1 },
-      { id: 'stop-2', name: 'Market Complex', lat: 13.6350, lng: 79.4250, order: 2 },
-      { id: 'stop-3', name: 'Central Railway Station', lat: 13.6420, lng: 79.4300, order: 3 },
-      { id: 'stop-4', name: 'North City Terminal', lat: 13.6510, lng: 79.4380, order: 4 },
-    ],
-    created_at: new Date().toISOString(),
-  };
-
-  const route2 = {
-    id: 'route-south-2',
-    name: 'Route B (South Tech Shuttle)',
-    description: 'South Campus to Tech Park and City Mall',
-    active: true,
-    stops: [
-      { id: 'stop-5', name: 'South Campus Gate', lat: 13.6200, lng: 79.4120, order: 1 },
-      { id: 'stop-6', name: 'Tech Park Circle', lat: 13.6150, lng: 79.4050, order: 2 },
-      { id: 'stop-7', name: 'City Mall Junction', lat: 13.6080, lng: 79.3980, order: 3 },
-    ],
-    created_at: new Date().toISOString(),
-  };
-
   const bus1 = {
     id: 'bus-01',
     number: 'BUS-01',
-    route_id: route1.id,
+    route_id: null,
     driver_id: 'user-driver-1',
     capacity: 45,
     status: 'idle',
@@ -86,7 +59,7 @@ async function initLocalStore() {
   const bus2 = {
     id: 'bus-02',
     number: 'BUS-02',
-    route_id: route2.id,
+    route_id: null,
     driver_id: 'user-driver-2',
     capacity: 45,
     status: 'idle',
@@ -138,7 +111,7 @@ async function initLocalStore() {
       password_hash: studentPass,
       role: 'student',
       bus_id: 'bus-01',
-      stop_id: 'stop-2',
+      stop_id: null,
       phone: '+91 98765 11111',
       active: true,
       created_at: new Date().toISOString(),
@@ -150,20 +123,8 @@ async function initLocalStore() {
       password_hash: studentPass,
       role: 'student',
       bus_id: 'bus-01',
-      stop_id: 'stop-3',
+      stop_id: null,
       phone: '+91 98765 22222',
-      active: true,
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'user-student-3',
-      name: 'Rohan Gupta',
-      email: 'student3@busora.com',
-      password_hash: studentPass,
-      role: 'student',
-      bus_id: 'bus-02',
-      stop_id: 'stop-6',
-      phone: '+91 98765 33333',
       active: true,
       created_at: new Date().toISOString(),
     },
@@ -171,7 +132,7 @@ async function initLocalStore() {
 
   localStore = {
     users,
-    routes: [route1, route2],
+    routes: [], // Starts completely empty so Admin adds them
     buses: [bus1, bus2],
     trips: [],
     bus_locations: [],
@@ -256,6 +217,7 @@ export const db = {
     return true;
   },
 
+  // ---- Buses ----
   async getBuses() {
     if (isSupabaseConfigured) {
       const { data } = await supabase.from('buses').select('*, routes(*), users(name, email, phone)').order('number');
@@ -301,6 +263,30 @@ export const db = {
     };
   },
 
+  async createBus(busData) {
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase.from('buses').insert(busData).select().single();
+      if (error) throw error;
+      return data;
+    }
+    const newBus = {
+      id: 'bus-' + Date.now(),
+      number: busData.number,
+      route_id: busData.route_id || null,
+      driver_id: busData.driver_id || null,
+      capacity: busData.capacity || 45,
+      status: 'idle',
+      last_lat: busData.last_lat || 13.6288,
+      last_lng: busData.last_lng || 79.4192,
+      last_speed: 0,
+      active: true,
+      created_at: new Date().toISOString(),
+    };
+    localStore.buses.push(newBus);
+    saveLocalStore();
+    return newBus;
+  },
+
   async updateBus(id, updateData) {
     if (isSupabaseConfigured) {
       const { data, error } = await supabase.from('buses').update(updateData).eq('id', id).select().single();
@@ -314,14 +300,109 @@ export const db = {
     return localStore.buses[idx];
   },
 
+  async deleteBus(id) {
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.from('buses').delete().eq('id', id);
+      if (error) throw error;
+      return true;
+    }
+    localStore.buses = localStore.buses.filter((b) => b.id !== id);
+    saveLocalStore();
+    return true;
+  },
+
+  // ---- Routes ----
   async getRoutes() {
     if (isSupabaseConfigured) {
       const { data } = await supabase.from('routes').select('*').order('name');
       return data || [];
     }
-    return localStore.routes;
+    return localStore.routes || [];
   },
 
+  async getRouteById(id) {
+    if (isSupabaseConfigured) {
+      const { data } = await supabase.from('routes').select('*').eq('id', id).maybeSingle();
+      return data;
+    }
+    return (localStore.routes || []).find((r) => r.id === id);
+  },
+
+  async createRoute(routeData) {
+    const formattedStops = (routeData.stops || []).map((s, idx) => ({
+      id: s.id || `stop-${Date.now()}-${idx + 1}`,
+      name: s.name,
+      lat: Number(s.lat) || 13.6288,
+      lng: Number(s.lng) || 79.4192,
+      order: idx + 1,
+    }));
+
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase.from('routes').insert({
+        name: routeData.name,
+        description: routeData.description || '',
+        stops: formattedStops,
+        active: true,
+      }).select().single();
+      if (error) throw error;
+      return data;
+    }
+
+    const newRoute = {
+      id: 'route-' + Date.now(),
+      name: routeData.name,
+      description: routeData.description || '',
+      stops: formattedStops,
+      active: true,
+      created_at: new Date().toISOString(),
+    };
+    localStore.routes.push(newRoute);
+    saveLocalStore();
+    return newRoute;
+  },
+
+  async updateRoute(id, updateData) {
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase.from('routes').update(updateData).eq('id', id).select().single();
+      if (error) throw error;
+      return data;
+    }
+    const idx = localStore.routes.findIndex((r) => r.id === id);
+    if (idx === -1) return null;
+    localStore.routes[idx] = { ...localStore.routes[idx], ...updateData, updated_at: new Date().toISOString() };
+    saveLocalStore();
+    return localStore.routes[idx];
+  },
+
+  async deleteRoute(id) {
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.from('routes').delete().eq('id', id);
+      if (error) throw error;
+      return true;
+    }
+    localStore.routes = localStore.routes.filter((r) => r.id !== id);
+    // Unassign this route from all buses
+    localStore.buses.forEach((b) => {
+      if (b.route_id === id) b.route_id = null;
+    });
+    saveLocalStore();
+    return true;
+  },
+
+  // Convenient helper to assign Route to Bus & Driver
+  async assignRoute(routeId, busId, driverId) {
+    if (!busId) throw new Error('Please select a bus');
+    const updatePayload = { route_id: routeId };
+    if (driverId) updatePayload.driver_id = driverId;
+    await this.updateBus(busId, updatePayload);
+
+    if (driverId) {
+      await this.updateUser(driverId, { bus_id: busId });
+    }
+    return true;
+  },
+
+  // ---- Trips ----
   async getActiveTripByDriver(driverId) {
     if (isSupabaseConfigured) {
       const { data } = await supabase.from('trips').select('*').eq('driver_id', driverId).eq('status', 'active').maybeSingle();
@@ -387,7 +468,6 @@ export const db = {
       await supabase.from('bus_locations').insert({ trip_id: tripId, bus_id: busId, lat, lng, speed, created_at: at });
     } else {
       localStore.bus_locations.push({ id: 'loc-' + Date.now(), trip_id: tripId, bus_id: busId, lat, lng, speed, created_at: at });
-      // Keep last 1000 points
       if (localStore.bus_locations.length > 1000) {
         localStore.bus_locations.shift();
       }

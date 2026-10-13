@@ -533,7 +533,62 @@ app.delete('/api/admin/users/:id', auth('admin'), async (req, res) => {
   }
 });
 
-// Admin Buses & Routes
+// Admin Routes Management
+app.get('/api/admin/routes', auth('admin'), async (req, res) => {
+  try {
+    const routes = await db.getRoutes();
+    res.json(routes);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/routes', auth('admin'), async (req, res) => {
+  try {
+    const { name, description, stops } = req.body;
+    if (!name) return res.status(400).json({ error: 'Route name is required' });
+    const newRoute = await db.createRoute({ name, description, stops });
+    res.status(201).json(newRoute);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/routes/:id', auth('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updated = await db.updateRoute(id, req.body);
+    if (!updated) return res.status(404).json({ error: 'Route not found' });
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/routes/:id', auth('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.deleteRoute(id);
+    res.json({ ok: true, message: 'Route deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/routes/assign', auth('admin'), async (req, res) => {
+  try {
+    const { route_id, bus_id, driver_id } = req.body;
+    if (!route_id || !bus_id) {
+      return res.status(400).json({ error: 'Route ID and Bus ID are required' });
+    }
+    await db.assignRoute(route_id, bus_id, driver_id);
+    res.json({ ok: true, message: 'Route assigned successfully to bus and driver' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin Buses Management
 app.get('/api/admin/buses', auth('admin'), async (req, res) => {
   try {
     const buses = await db.getBuses();
@@ -543,10 +598,33 @@ app.get('/api/admin/buses', auth('admin'), async (req, res) => {
   }
 });
 
-app.get('/api/admin/routes', auth('admin'), async (req, res) => {
+app.post('/api/admin/buses', auth('admin'), async (req, res) => {
   try {
-    const routes = await db.getRoutes();
-    res.json(routes);
+    const { number, route_id, driver_id, capacity } = req.body;
+    if (!number) return res.status(400).json({ error: 'Bus number is required' });
+    const newBus = await db.createBus({ number, route_id, driver_id, capacity });
+    res.status(201).json(newBus);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/admin/buses/:id', auth('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updated = await db.updateBus(id, req.body);
+    if (!updated) return res.status(404).json({ error: 'Bus not found' });
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/buses/:id', auth('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.deleteBus(id);
+    res.json({ ok: true, message: 'Bus deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
