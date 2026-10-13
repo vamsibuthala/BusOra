@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Bus, GraduationCap, X, Lock, Mail, ArrowRight, AlertCircle, Sparkles } from 'lucide-react';
+import { ShieldCheck, Bus, GraduationCap, X, Lock, Mail, ArrowRight, AlertCircle } from 'lucide-react';
 import { apiRequest, setToken, setStoredUser } from '../services/api';
 
 export default function LoginModal({ isOpen, onClose, defaultRole = 'student', onSuccess }) {
@@ -14,21 +14,6 @@ export default function LoginModal({ isOpen, onClose, defaultRole = 'student', o
   const handleRoleChange = (newRole) => {
     setRole(newRole);
     setError('');
-    // Auto-prefill demo credentials based on role
-    if (newRole === 'admin') {
-      setEmail('admin@busora.com');
-      setPassword('Admin@123');
-    } else if (newRole === 'driver') {
-      setEmail('driver@busora.com');
-      setPassword('Driver@123');
-    } else {
-      setEmail('student@busora.com');
-      setPassword('Student@123');
-    }
-  };
-
-  const handleQuickFill = (r) => {
-    handleRoleChange(r);
   };
 
   const handleSubmit = async (e) => {
@@ -141,7 +126,7 @@ export default function LoginModal({ isOpen, onClose, defaultRole = 'student', o
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder={`e.g. ${role}@busora.com`}
+                  placeholder="Enter your email address"
                   className="w-full rounded-xl border border-slate-200 pl-10 pr-3.5 py-2.5 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
                 />
               </div>
@@ -155,7 +140,7 @@ export default function LoginModal({ isOpen, onClose, defaultRole = 'student', o
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter password"
+                  placeholder="Enter your password"
                   className="w-full rounded-xl border border-slate-200 pl-10 pr-3.5 py-2.5 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
                 />
               </div>
@@ -178,45 +163,6 @@ export default function LoginModal({ isOpen, onClose, defaultRole = 'student', o
               )}
             </button>
           </form>
-
-          {/* Quick Demo Credentials Auto-Fill Section */}
-          <div className="mt-6 rounded-2xl bg-sky-50/70 p-3.5 border border-sky-100">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold text-sky-900 flex items-center gap-1.5">
-                <Sparkles className="h-3.5 w-3.5 text-sky-600" />
-                1-Click Demo Fill:
-              </span>
-              <span className="text-[10px] text-sky-700">Click to test instantly</span>
-            </div>
-            <div className="grid grid-cols-3 gap-1.5 text-xs">
-              <button
-                type="button"
-                onClick={() => handleQuickFill('admin')}
-                className="rounded-lg bg-white p-1.5 text-left font-medium text-slate-700 hover:border-purple-300 border border-slate-200 transition-colors shadow-2xs"
-              >
-                <span className="block font-bold text-purple-700 text-[11px]">👑 Admin</span>
-                <span className="block text-[10px] text-slate-400 truncate">admin@busora.com</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickFill('driver')}
-                className="rounded-lg bg-white p-1.5 text-left font-medium text-slate-700 hover:border-emerald-300 border border-slate-200 transition-colors shadow-2xs"
-              >
-                <span className="block font-bold text-emerald-700 text-[11px]">🚍 Driver</span>
-                <span className="block text-[10px] text-slate-400 truncate">driver@busora.com</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickFill('student')}
-                className="rounded-lg bg-white p-1.5 text-left font-medium text-slate-700 hover:border-sky-300 border border-slate-200 transition-colors shadow-2xs"
-              >
-                <span className="block font-bold text-sky-700 text-[11px]">🎓 Student</span>
-                <span className="block text-[10px] text-slate-400 truncate">student@busora.com</span>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

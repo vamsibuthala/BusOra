@@ -11,16 +11,18 @@ import {
   Users, 
   Smartphone, 
   Activity, 
-  Sparkles,
   Database,
-  Navigation
+  Navigation,
+  Mail,
+  Phone,
+  Linkedin,
+  ExternalLink
 } from 'lucide-react';
 import BusMap from '../components/BusMap';
 import { apiRequest } from '../services/api';
 
 export default function HomePage({ onOpenLogin, onSelectTab }) {
   const [summaryData, setSummaryData] = useState(null);
-  const [activeRouteTab, setActiveRouteTab] = useState(0);
   const [simSpeed, setSimSpeed] = useState(36);
 
   useEffect(() => {
@@ -29,34 +31,13 @@ export default function HomePage({ onOpenLogin, onSelectTab }) {
       .catch((err) => console.log('Could not fetch public summary:', err));
   }, []);
 
-  // Demo stops for interactive preview
-  const demoRoutes = summaryData?.routes?.length
-    ? summaryData.routes
-    : [
-        {
-          id: 'r1',
-          name: 'Route A (North Campus Express)',
-          description: 'Main Campus to North City via Station',
-          stops: [
-            { id: 's1', name: 'Main Campus Gate', lat: 13.6288, lng: 79.4192, order: 1 },
-            { id: 's2', name: 'Market Complex', lat: 13.635, lng: 79.425, order: 2 },
-            { id: 's3', name: 'Central Railway Station', lat: 13.642, lng: 79.43, order: 3 },
-            { id: 's4', name: 'North City Terminal', lat: 13.651, lng: 79.438, order: 4 },
-          ],
-        },
-        {
-          id: 'r2',
-          name: 'Route B (South Tech Shuttle)',
-          description: 'South Campus to Tech Park and City Mall',
-          stops: [
-            { id: 's5', name: 'South Campus Gate', lat: 13.62, lng: 79.412, order: 1 },
-            { id: 's6', name: 'Tech Park Circle', lat: 13.615, lng: 79.405, order: 2 },
-            { id: 's7', name: 'City Mall Junction', lat: 13.608, lng: 79.398, order: 3 },
-          ],
-        },
-      ];
+  const defaultStops = [
+    { id: 's1', name: 'Main Campus Gate', lat: 13.6288, lng: 79.4192, order: 1 },
+    { id: 's2', name: 'Market Complex', lat: 13.635, lng: 79.425, order: 2 },
+    { id: 's3', name: 'Central Railway Station', lat: 13.642, lng: 79.43, order: 3 },
+    { id: 's4', name: 'North City Terminal', lat: 13.651, lng: 79.438, order: 4 },
+  ];
 
-  const currentRoute = demoRoutes[activeRouteTab] || demoRoutes[0];
   const demoBuses = [
     {
       id: 'demo-bus-1',
@@ -68,6 +49,8 @@ export default function HomePage({ onOpenLogin, onSelectTab }) {
       at: new Date().toISOString(),
     },
   ];
+
+  const linkedinUrl = "https://www.linkedin.com/in/vamsi-buthala-375859432?utm_source=share_via&utm_content=profile&utm_medium=member_android";
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
@@ -136,12 +119,6 @@ export default function HomePage({ onOpenLogin, onSelectTab }) {
                   Admin Console
                 </button>
               </div>
-
-              {/* Demo Credentials Pill */}
-              <div className="pt-2 text-xs text-slate-400 flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-amber-400" />
-                <span>Demo accounts pre-configured for instant testing (Password: <code className="bg-navy-900 px-1.5 py-0.5 rounded text-sky-300 font-mono">Admin@123</code> / <code className="bg-navy-900 px-1.5 py-0.5 rounded text-sky-300 font-mono">Driver@123</code>)</span>
-              </div>
             </div>
 
             {/* Right Column: Live Interactive Simulator Card */}
@@ -164,8 +141,8 @@ export default function HomePage({ onOpenLogin, onSelectTab }) {
                 <div className="my-3">
                   <BusMap
                     buses={demoBuses}
-                    stops={currentRoute.stops}
-                    userStop={currentRoute.stops[1]}
+                    stops={defaultStops}
+                    userStop={defaultStops[1]}
                     height="240px"
                   />
                 </div>
@@ -225,79 +202,6 @@ export default function HomePage({ onOpenLogin, onSelectTab }) {
                 <span className="text-2xl sm:text-3xl font-black">&lt; 60s</span>
               </div>
               <p className="text-xs font-semibold text-slate-500">Emergency Incident Response</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Interactive Routes & Stops Explorer */}
-      <section className="py-16 bg-slate-50">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-2xl mx-auto mb-10">
-            <div className="inline-flex items-center gap-1.5 rounded-full bg-sky-100 px-3 py-1 text-xs font-bold text-sky-800 mb-3">
-              <MapPin className="h-3.5 w-3.5" />
-              <span>Campus Transit Network</span>
-            </div>
-            <h2 className="text-3xl font-black tracking-tight text-navy-900">
-              Interactive Route & Stop Directory
-            </h2>
-            <p className="text-sm text-slate-600 mt-2">
-              Explore college bus routes, stop sequences, and geographical coordinates in real-time.
-            </p>
-          </div>
-
-          {/* Route selector pills */}
-          <div className="flex justify-center gap-3 mb-8">
-            {demoRoutes.map((r, i) => (
-              <button
-                key={r.id || i}
-                onClick={() => setActiveRouteTab(i)}
-                className={`flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold transition-all ${
-                  activeRouteTab === i
-                    ? 'bg-navy-800 text-white shadow-md'
-                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                <Bus className={`h-4 w-4 ${activeRouteTab === i ? 'text-sky-400' : 'text-slate-400'}`} />
-                <span>{r.name}</span>
-              </button>
-            ))}
-          </div>
-
-          {/* Route Details Card */}
-          <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-card border border-slate-100">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-slate-100 gap-4">
-              <div>
-                <h3 className="text-xl font-black text-navy-900">{currentRoute.name}</h3>
-                <p className="text-xs text-slate-500 mt-0.5">{currentRoute.description}</p>
-              </div>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
-                <CheckCircle className="h-3.5 w-3.5" />
-                <span>{currentRoute.stops?.length || 0} Scheduled Stops</span>
-              </span>
-            </div>
-
-            {/* Stops Timeline */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
-              {currentRoute.stops?.map((stop, idx) => (
-                <div
-                  key={stop.id || idx}
-                  className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 transition-all hover:bg-sky-50/50 hover:border-sky-300"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-navy-800 text-xs font-black text-white">
-                      {idx + 1}
-                    </span>
-                    <span className="text-[11px] font-mono text-slate-400">
-                      {stop.lat?.toFixed(3)}, {stop.lng?.toFixed(3)}
-                    </span>
-                  </div>
-                  <h4 className="font-bold text-sm text-slate-900">{stop.name}</h4>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {idx === 0 ? '🏁 Route Origin' : idx === currentRoute.stops.length - 1 ? '🎯 Final Campus Gate' : '📍 Boarding Point'}
-                  </p>
-                </div>
-              ))}
             </div>
           </div>
         </div>
@@ -483,6 +387,92 @@ export default function HomePage({ onOpenLogin, onSelectTab }) {
         </div>
       </section>
 
+      {/* Developer Profile Section (VAMSI BUTHALA) */}
+      <section className="py-20 bg-gradient-to-b from-white to-slate-50 border-t border-slate-200">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+          <div className="text-center max-w-2xl mx-auto mb-12">
+            <div className="inline-flex items-center gap-1.5 rounded-full bg-sky-100 px-3 py-1 text-xs font-bold text-sky-800 mb-3">
+              <CheckCircle className="h-3.5 w-3.5 text-sky-600" />
+              <span>Project Architect & Lead Developer</span>
+            </div>
+            <h2 className="text-3xl font-black text-navy-900">
+              Meet The Creator
+            </h2>
+            <p className="text-sm text-slate-600 mt-2">
+              Designed and engineered by Vamsi Buthala with modern full-stack technologies.
+            </p>
+          </div>
+
+          <div className="rounded-3xl bg-white p-6 sm:p-10 shadow-xl border border-slate-200/80 transition-all hover:shadow-2xl">
+            <div className="flex flex-col md:flex-row items-center gap-8">
+              {/* Photo with stylish border & badge */}
+              <div className="relative shrink-0">
+                <div className="relative h-44 w-44 sm:h-52 sm:w-52 rounded-2xl overflow-hidden shadow-xl ring-4 ring-sky-500/20 bg-slate-100">
+                  <img 
+                    src="/vamsi.jpg" 
+                    alt="Vamsi Buthala" 
+                    className="h-full w-full object-cover object-top"
+                  />
+                </div>
+                <span className="absolute -bottom-2 -right-2 inline-flex items-center gap-1 rounded-full bg-emerald-500 px-3 py-1 text-xs font-bold text-white shadow-md">
+                  <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
+                  Developer
+                </span>
+              </div>
+
+              {/* Details & LinkedIn Button */}
+              <div className="flex-1 text-center md:text-left space-y-4">
+                <div>
+                  <h3 className="text-2xl sm:text-3xl font-black tracking-tight text-navy-900">
+                    VAMSI BUTHALA
+                  </h3>
+                  <p className="text-sm font-semibold text-sky-600 mt-1">
+                    Full-Stack Software Engineer & System Architect
+                  </p>
+                </div>
+
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed max-w-xl">
+                  Creator and developer of <b>BusOra</b>, specializing in real-time geospatial applications, scalable backend systems, responsive user interfaces, and cloud transit fleet management platforms.
+                </p>
+
+                {/* Contact info grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                  <a 
+                    href="mailto:vamsibuthala@gmail.com"
+                    className="flex items-center justify-center md:justify-start gap-2.5 rounded-xl bg-slate-50 hover:bg-sky-50 p-3 text-xs font-semibold text-slate-700 hover:text-sky-700 border border-slate-200/80 transition-colors"
+                  >
+                    <Mail className="h-4 w-4 text-sky-500 shrink-0" />
+                    <span className="truncate">vamsibuthala@gmail.com</span>
+                  </a>
+
+                  <a 
+                    href="tel:6304652913"
+                    className="flex items-center justify-center md:justify-start gap-2.5 rounded-xl bg-slate-50 hover:bg-emerald-50 p-3 text-xs font-semibold text-slate-700 hover:text-emerald-700 border border-slate-200/80 transition-colors"
+                  >
+                    <Phone className="h-4 w-4 text-emerald-500 shrink-0" />
+                    <span>+91 6304652913</span>
+                  </a>
+                </div>
+
+                {/* LinkedIn Action Button */}
+                <div className="pt-3">
+                  <a
+                    href={linkedinUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-2.5 rounded-xl bg-[#0077b5] px-6 py-3.5 text-sm font-bold text-white shadow-md hover:bg-[#005f93] hover:shadow-lg transition-all active:scale-95"
+                  >
+                    <Linkedin className="h-5 w-5 fill-white" />
+                    <span>Connect with Vamsi on LinkedIn</span>
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* CTA Ribbon */}
       <section className="bg-gradient-to-r from-navy-900 via-navy-800 to-sky-900 py-16 text-white text-center">
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 space-y-6">
@@ -495,7 +485,7 @@ export default function HomePage({ onOpenLogin, onSelectTab }) {
             Ready to track your college transit?
           </h2>
           <p className="text-sm text-sky-200 max-w-xl mx-auto leading-relaxed">
-            Select your role above or use the demo credentials to test the student tracker, driver cockpit, or administrator panel.
+            Select your role above to access the student tracker, driver cockpit, or administrator panel.
           </p>
           <div className="pt-4 flex justify-center gap-3">
             <button
