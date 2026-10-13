@@ -94,6 +94,24 @@ export default function RoutesPage({ onOpenLogin }) {
                     {activeRoute.description && (
                       <p className="text-xs text-slate-600 mt-1 leading-relaxed">{activeRoute.description}</p>
                     )}
+                    <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-slate-600">
+                      {activeRoute.distanceKm && (
+                        <span className="font-bold text-purple-700">📍 {activeRoute.distanceKm} km</span>
+                      )}
+                      {activeRoute.durationMin && (
+                        <span className="font-bold text-purple-700">⏱ ~{activeRoute.durationMin} mins</span>
+                      )}
+                      {activeRoute.stops && activeRoute.stops.length >= 2 && (
+                        <a
+                          href={`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(activeRoute.stops[0].name)}&destination=${encodeURIComponent(activeRoute.stops[activeRoute.stops.length - 1].name)}&waypoints=${activeRoute.stops.slice(1, -1).map(s => encodeURIComponent(s.name)).join('|')}&travelmode=driving`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-bold text-sky-600 hover:text-sky-700 hover:underline"
+                        >
+                          ↗ Open in Google Maps
+                        </a>
+                      )}
+                    </div>
                   </div>
 
                   <div className="pt-2 border-t border-slate-100">
@@ -144,11 +162,13 @@ export default function RoutesPage({ onOpenLogin }) {
                     <Navigation className="h-4 w-4 text-sky-500" />
                     Route Path & Geolocation Points
                   </h3>
-                  <span className="text-xs text-slate-400">OpenStreetMap GPS Grid</span>
+                  <span className="text-xs text-purple-700 font-bold">Google Maps Road Network</span>
                 </div>
 
                 <BusMap
                   stops={activeRoute.stops || []}
+                  routePath={activeRoute.path || null}
+                  mapType="google"
                   height="500px"
                 />
               </div>

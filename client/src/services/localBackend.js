@@ -307,6 +307,9 @@ export async function handleLocalApi(path, method = 'GET', body = null) {
         id: 'route-' + Date.now(),
         name: body.name,
         description: body.description || '',
+        distanceKm: body.distanceKm || null,
+        durationMin: body.durationMin || null,
+        path: body.path || [],
         stops: (body.stops || []).map((s, idx) => ({
           id: s.id || `stop-${Date.now()}-${idx + 1}`,
           name: s.name,

@@ -300,6 +300,8 @@ export default function StudentDashboard({ user }) {
             }
             stops={stops}
             userStop={userStop}
+            routePath={bus?.route?.path || null}
+            mapType="google"
             height="440px"
           />
         </div>

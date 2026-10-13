@@ -28,10 +28,12 @@ export default function BusMap({
   buses = [],
   stops = [],
   userStop = null,
+  routePath = null,
   center = [13.6288, 79.4192],
   zoom = 14,
   height = '420px',
   showPolyline = true,
+  mapType = 'google',
 }) {
   // Compute bounds if stops exist
   const stopPoints = stops.filter((s) => s.lat && s.lng).map((s) => [s.lat, s.lng]);
@@ -53,11 +55,23 @@ export default function BusMap({
     }
   };
 
-  const polylineCoords = stops
-    .slice()
-    .sort((a, b) => (a.order || 0) - (b.order || 0))
-    .filter((s) => s.lat && s.lng)
-    .map((s) => [s.lat, s.lng]);
+  const polylineCoords = routePath && routePath.length > 1
+    ? routePath
+    : stops
+        .slice()
+        .sort((a, b) => (a.order || 0) - (b.order || 0))
+        .filter((s) => s.lat && s.lng)
+        .map((s) => [s.lat, s.lng]);
+
+  const tileUrl = mapType === 'satellite'
+    ? 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
+    : mapType === 'osm'
+    ? 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+    : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+
+  const tileAttribution = mapType === 'osm'
+    ? '&copy; OpenStreetMap contributors'
+    : '&copy; Google Maps';
 
   const mapCenter =
     buses[0]?.lat && buses[0]?.lng
@@ -76,21 +90,20 @@ export default function BusMap({
         className="z-10"
       >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution={tileAttribution}
+          url={tileUrl}
         />
 
         <MapUpdater center={mapCenter} zoom={zoom} bounds={allPoints.length > 1 ? allPoints : null} />
 
-        {/* Route Polyline connecting stops */}
+        {/* Route Polyline connecting stops or highway road path */}
         {showPolyline && polylineCoords.length > 1 && (
           <Polyline
             positions={polylineCoords}
             pathOptions={{
               color: '#0284c7',
-              weight: 4,
-              dashArray: '8, 8',
-              opacity: 0.7,
+              weight: 5,
+              opacity: 0.8,
             }}
           />
         )}
