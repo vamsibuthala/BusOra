@@ -275,10 +275,21 @@ export default function AdminDashboard({ user }) {
     setNewRoute({ ...newRoute, stops: updated });
   };
 
-  const handleSaveNewRoute = async (routeData) => {
+  const handleSaveNewRoute = async (payload) => {
     try {
       setFormError('');
-      await apiRequest('/admin/routes', 'POST', routeData);
+      const routeData = payload.routeData || payload;
+      const created = await apiRequest('/admin/routes', 'POST', routeData);
+
+      // If admin assigned a bus and driver during route initiation
+      if (payload.assignBusId && created?.id) {
+        await apiRequest('/admin/routes/assign', 'POST', {
+          route_id: created.id,
+          bus_id: payload.assignBusId,
+          driver_id: payload.assignDriverId || null,
+        });
+      }
+
       setShowAddRouteModal(false);
       loadAllAdminData();
     } catch (err) {
@@ -1031,6 +1042,8 @@ export default function AdminDashboard({ user }) {
         isOpen={showAddRouteModal}
         onClose={() => setShowAddRouteModal(false)}
         onSaveRoute={handleSaveNewRoute}
+        buses={buses}
+        drivers={driversList}
       />
 
       {/* ======================================================== */}

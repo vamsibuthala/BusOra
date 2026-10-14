@@ -28,8 +28,9 @@ import {
   Compass,
   Sparkles,
   Crosshair,
-  Map as MapIcon,
-  RefreshCw
+  Bus,
+  UserCheck,
+  Milestone
 } from 'lucide-react';
 import GooglePlacesSearchInput from './GooglePlacesSearchInput';
 import { 
@@ -38,37 +39,38 @@ import {
   computeDrivingRoute 
 } from '../services/placesService';
 
-// Custom Google Maps-style markers for Start, Destination, and Stopping Points
-const createMarkerIcon = (bgColor, label, textColor = '#ffffff') => {
+// Custom Google Maps-style markers for Start, Via points, Stops, and Destination
+const createMarkerIcon = (bgColor, label, textColor = '#ffffff', size = 30) => {
   return L.divIcon({
     className: 'custom-bus-marker',
     html: `
       <div style="
         background-color: ${bgColor};
         color: ${textColor};
-        width: 30px;
-        height: 30px;
+        width: ${size}px;
+        height: ${size}px;
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
         font-weight: 900;
-        font-size: 11px;
+        font-size: ${size > 26 ? '11px' : '10px'};
         box-shadow: 0 4px 12px rgba(0,0,0,0.35);
         border: 2.5px solid #ffffff;
       ">
         ${label}
       </div>
     `,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
-    popupAnchor: [0, -15],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
   });
 };
 
 const startIcon = createMarkerIcon('#10b981', 'A'); // Green for Start (Origin)
 const endIcon = createMarkerIcon('#ef4444', 'B');   // Red for Destination (Terminal)
-const stopIcon = (num) => createMarkerIcon('#0284c7', num); // Blue for intermediate stops
+const viaIcon = (num) => createMarkerIcon('#8b5cf6', `V${num}`, '#ffffff', 26); // Purple for Via points
+const stopIcon = (num) => createMarkerIcon('#0284c7', num, '#ffffff', 28); // Blue for intermediate stops
 
 // Helper to fit bounds smoothly when route, start, or stops update
 function MapBoundsUpdater({ points }) {
@@ -98,17 +100,26 @@ function MapClickHandler({ onMapClick }) {
   return null;
 }
 
-export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
+export default function RouteInitiatorModal({ 
+  isOpen, 
+  onClose, 
+  onSaveRoute,
+  buses = [],
+  drivers = []
+}) {
   // Search inputs & selected locations
   const [startQuery, setStartQuery] = useState('');
   const [endQuery, setEndQuery] = useState('');
   const [startPlace, setStartPlace] = useState(null); // { name, secondary, lat, lng }
   const [endPlace, setEndPlace] = useState(null);     // { name, secondary, lat, lng }
 
-  // Map picking mode: 'none' | 'start' | 'end' | 'stop'
+  // MULTIPLE VIA POINTS: array of { id, query, place: { name, secondary, lat, lng } }
+  const [viaPoints, setViaPoints] = useState([]);
+
+  // Map picking mode: 'none' | 'start' | 'end' | 'via-{idx}' | 'stop'
   const [pickingMode, setPickingMode] = useState('none');
 
-  // Intermediate stopping points between start & end
+  // Intermediate stopping points (passenger bus stops)
   const [stops, setStops] = useState([]); // [{ id, name, lat, lng, order }]
   const [stopInputQuery, setStopInputQuery] = useState('');
   const [selectedStopPlace, setSelectedStopPlace] = useState(null);
@@ -117,9 +128,11 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
   const [routeOptions, setRouteOptions] = useState([]);
   const [selectedRouteIdx, setSelectedRouteIdx] = useState(0);
 
-  // Route identity
+  // Route identity & Assignment
   const [routeName, setRouteName] = useState('');
   const [routeDescription, setRouteDescription] = useState('');
+  const [selectedBusId, setSelectedBusId] = useState('');
+  const [selectedDriverId, setSelectedDriverId] = useState('');
 
   // UI state
   const [isComputing, setIsComputing] = useState(false);
@@ -127,30 +140,85 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
   const [errorMessage, setErrorMessage] = useState('');
   const [mapType, setMapType] = useState('google'); // 'google' | 'satellite' | 'osm'
 
+  // Pre-select first available bus and driver if available
+  useEffect(() => {
+    if (buses.length > 0 && !selectedBusId) {
+      setSelectedBusId(buses[0].id);
+    }
+    if (drivers.length > 0 && !selectedDriverId) {
+      setSelectedDriverId(drivers[0].id);
+    }
+  }, [buses, drivers]);
+
   if (!isOpen) return null;
 
-  // Calculate driving routes through all waypoints (start -> stops -> end)
-  const calculateRoutes = async (origin, dest, currentStops = []) => {
+  // Add a new empty via point
+  const handleAddViaPoint = () => {
+    setViaPoints((prev) => [
+      ...prev,
+      {
+        id: `via-${Date.now()}-${prev.length + 1}`,
+        query: '',
+        place: null,
+      },
+    ]);
+  };
+
+  // Update via point query or place
+  const handleUpdateViaPoint = (idx, query, place = null) => {
+    setViaPoints((prev) => {
+      const copy = [...prev];
+      copy[idx] = { ...copy[idx], query, place: place || copy[idx].place };
+      return copy;
+    });
+  };
+
+  // Move via point up or down
+  const handleMoveViaPoint = (idx, direction) => {
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= viaPoints.length) return;
+    setViaPoints((prev) => {
+      const copy = [...prev];
+      const temp = copy[idx];
+      copy[idx] = copy[targetIdx];
+      copy[targetIdx] = temp;
+      return copy;
+    });
+  };
+
+  // Remove via point
+  const handleRemoveViaPoint = (idx) => {
+    setViaPoints((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  // Calculate driving routes through Start -> Via Points -> End
+  const calculateRoutes = async (origin, dest, currentViaPoints = [], currentStops = []) => {
     if (!origin || !dest) return;
     setIsComputing(true);
     setErrorMessage('');
-    setStatusMessage('Computing Google Maps driving road paths...');
+    setStatusMessage('Computing Google Maps driving road paths through all via points...');
 
     try {
-      const waypoints = [origin, ...currentStops, dest];
-      const routes = await computeDrivingRoute(waypoints);
+      // Waypoints: origin -> via points -> dest
+      const validViaPlaces = currentViaPoints.map((v) => v.place).filter(Boolean);
+      const intermediateStops = currentStops.length > 0 ? currentStops : [];
+
+      // Combine intermediate waypoints: via points + additional passenger stops
+      const allWaypoints = [origin, ...validViaPlaces, ...intermediateStops, dest];
+      const routes = await computeDrivingRoute(allWaypoints);
       setRouteOptions(routes);
       setSelectedRouteIdx(0);
 
       // Auto-populate route name if empty
+      const viaText = validViaPlaces.length > 0 ? ` via ${validViaPlaces.map(v => v.name).join(', ')}` : '';
       if (!routeName) {
-        setRouteName(`${origin.name} to ${dest.name} Route`);
+        setRouteName(`${origin.name} to ${dest.name}${viaText}`);
       }
       if (!routeDescription) {
-        setRouteDescription(`Campus transit corridor from ${origin.name} to ${dest.name} via ${currentStops.length} stops.`);
+        setRouteDescription(`Campus transit corridor from ${origin.name} to ${dest.name}${viaText}.`);
       }
 
-      setStatusMessage(`Found ${routes.length} driving route(s) between ${origin.name} and ${dest.name}.`);
+      setStatusMessage(`Found ${routes.length} driving route(s) via ${validViaPlaces.length} via-point(s).`);
     } catch (err) {
       setErrorMessage(err.message || 'Error calculating routes.');
     } finally {
@@ -166,10 +234,10 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
     let origin = startPlace;
     let dest = endPlace;
 
-    // If startPlace not yet selected from dropdown, auto-resolve query
+    // Auto-resolve start if not picked from dropdown
     if (!origin && startQuery.trim()) {
       setIsComputing(true);
-      setStatusMessage(`Resolving "${startQuery}"...`);
+      setStatusMessage(`Resolving origin "${startQuery}"...`);
       const results = await searchLocationSuggestions(startQuery);
       if (results.length > 0) {
         origin = results[0];
@@ -182,10 +250,10 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
       }
     }
 
-    // If endPlace not yet selected from dropdown, auto-resolve query
+    // Auto-resolve destination if not picked from dropdown
     if (!dest && endQuery.trim()) {
       setIsComputing(true);
-      setStatusMessage(`Resolving "${endQuery}"...`);
+      setStatusMessage(`Resolving destination "${endQuery}"...`);
       const results = await searchLocationSuggestions(endQuery);
       if (results.length > 0) {
         dest = results[0];
@@ -203,15 +271,38 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
       return;
     }
 
-    // Initialize stop list: Start -> End if empty
-    if (stops.length === 0) {
-      setStops([
-        { id: 'stop-origin', name: origin.name, lat: origin.lat, lng: origin.lng, order: 1 },
-        { id: 'stop-dest', name: dest.name, lat: dest.lat, lng: dest.lng, order: 2 },
-      ]);
+    // Auto-resolve any via points that have text but haven't selected a place
+    const resolvedViaPoints = [...viaPoints];
+    for (let i = 0; i < resolvedViaPoints.length; i++) {
+      if (!resolvedViaPoints[i].place && resolvedViaPoints[i].query.trim()) {
+        const matches = await searchLocationSuggestions(resolvedViaPoints[i].query);
+        if (matches.length > 0) {
+          resolvedViaPoints[i] = {
+            ...resolvedViaPoints[i],
+            place: matches[0],
+            query: matches[0].name,
+          };
+        }
+      }
     }
+    setViaPoints(resolvedViaPoints);
 
-    await calculateRoutes(origin, dest, stops.slice(1, -1));
+    // Build default passenger stops sequence: Origin -> Via points -> Destination
+    const validViaPlaces = resolvedViaPoints.map(v => v.place).filter(Boolean);
+    const initialStops = [
+      { id: 'stop-origin', name: origin.name, lat: origin.lat, lng: origin.lng, order: 1 },
+      ...validViaPlaces.map((vp, i) => ({
+        id: `stop-via-${i + 1}`,
+        name: vp.name,
+        lat: vp.lat,
+        lng: vp.lng,
+        order: i + 2,
+      })),
+      { id: 'stop-dest', name: dest.name, lat: dest.lat, lng: dest.lng, order: validViaPlaces.length + 2 },
+    ];
+    setStops(initialStops);
+
+    await calculateRoutes(origin, dest, resolvedViaPoints, []);
   };
 
   // 2. Action: Add a stopping point from search input
@@ -252,9 +343,8 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
     setSelectedStopPlace(null);
     setStatusMessage(`Added stop: ${newStop.name}`);
 
-    // Recalculate route through all intermediate stops
-    const intermediate = sequenced.slice(1, -1);
-    await calculateRoutes(startPlace, endPlace, intermediate);
+    // Recalculate route through all stops and via points
+    await calculateRoutes(startPlace, endPlace, viaPoints, sequenced.slice(1, -1));
   };
 
   // 3. Action: Handle map clicks (for pick on map mode or dropping stops)
@@ -274,6 +364,15 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
       setEndQuery(geo.name);
       setPickingMode('none');
       setStatusMessage(`Destination set to: ${geo.name}`);
+      return;
+    }
+
+    if (pickingMode.startsWith('via-')) {
+      const viaIdx = parseInt(pickingMode.replace('via-', ''), 10);
+      const geo = await reverseGeocodeCoord(lat, lng);
+      handleUpdateViaPoint(viaIdx, geo.name, geo);
+      setPickingMode('none');
+      setStatusMessage(`Via Point #${viaIdx + 1} set to: ${geo.name}`);
       return;
     }
 
@@ -301,11 +400,10 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
     setStops(sequenced);
     setStatusMessage(`Added stop on map: ${geo.name}`);
 
-    const intermediate = sequenced.slice(1, -1);
-    await calculateRoutes(startPlace, endPlace, intermediate);
+    await calculateRoutes(startPlace, endPlace, viaPoints, sequenced.slice(1, -1));
   };
 
-  // Reorder stops (move up or down)
+  // Reorder stops
   const handleMoveStop = async (idx, direction) => {
     const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
     if (targetIdx <= 0 || targetIdx >= stops.length - 1) return;
@@ -318,8 +416,7 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
     const sequenced = updated.map((s, i) => ({ ...s, order: i + 1 }));
     setStops(sequenced);
 
-    const intermediate = sequenced.slice(1, -1);
-    await calculateRoutes(startPlace, endPlace, intermediate);
+    await calculateRoutes(startPlace, endPlace, viaPoints, sequenced.slice(1, -1));
   };
 
   // Remove a stop
@@ -333,18 +430,17 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
     const sequenced = updated.map((s, i) => ({ ...s, order: i + 1 }));
     setStops(sequenced);
 
-    const intermediate = sequenced.slice(1, -1);
-    await calculateRoutes(startPlace, endPlace, intermediate);
+    await calculateRoutes(startPlace, endPlace, viaPoints, sequenced.slice(1, -1));
   };
 
-  // Rename a stop inline
+  // Rename a stop
   const handleRenameStop = (idx, newName) => {
     const updated = [...stops];
     updated[idx].name = newName;
     setStops(updated);
   };
 
-  // Open the route in official Google Maps with all stops & waypoints
+  // Open the route in official Google Maps with all via points & stops
   const handleOpenGoogleMaps = () => {
     if (!startPlace || !endPlace) return;
     const origin = encodeURIComponent(`${startPlace.lat},${startPlace.lng}`);
@@ -357,7 +453,7 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
     window.open(googleMapsUrl, '_blank');
   };
 
-  // 4. Save & Create Route
+  // 4. Save Route & Immediately Assign to Bus & Driver
   const handleSubmitFinalRoute = (e) => {
     e.preventDefault();
     if (!routeName.trim()) {
@@ -372,18 +468,22 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
     const selectedRoute = routeOptions[selectedRouteIdx] || routeOptions[0];
 
     const finalPayload = {
-      name: routeName.trim(),
-      description: routeDescription.trim(),
-      distanceKm: selectedRoute?.distanceKm || null,
-      durationMin: selectedRoute?.durationMin || null,
-      path: selectedRoute?.coordinates || stops.map((s) => [s.lat, s.lng]),
-      stops: stops.map((s, idx) => ({
-        id: s.id,
-        name: s.name,
-        lat: s.lat,
-        lng: s.lng,
-        order: idx + 1,
-      })),
+      routeData: {
+        name: routeName.trim(),
+        description: routeDescription.trim(),
+        distanceKm: selectedRoute?.distanceKm || null,
+        durationMin: selectedRoute?.durationMin || null,
+        path: selectedRoute?.coordinates || stops.map((s) => [s.lat, s.lng]),
+        stops: stops.map((s, idx) => ({
+          id: s.id,
+          name: s.name,
+          lat: s.lat,
+          lng: s.lng,
+          order: idx + 1,
+        })),
+      },
+      assignBusId: selectedBusId || null,
+      assignDriverId: selectedDriverId || null,
     };
 
     onSaveRoute(finalPayload);
@@ -395,6 +495,7 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
   const allMapPoints = [
     ...(startPlace ? [[startPlace.lat, startPlace.lng]] : []),
     ...(endPlace ? [[endPlace.lat, endPlace.lng]] : []),
+    ...viaPoints.filter(v => v.place).map(v => [v.place.lat, v.place.lng]),
     ...stops.map((s) => [s.lat, s.lng]),
     ...(activeRoute?.coordinates || []),
   ];
@@ -430,11 +531,11 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
               <div className="flex items-center gap-2">
                 <h2 className="font-display text-lg font-black tracking-tight">Google Maps Route Initiator</h2>
                 <span className="rounded-full bg-emerald-500/20 border border-emerald-400/30 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
-                  Live Autocomplete Active
+                  Multiple Via Points & Driver Handover
                 </span>
               </div>
               <p className="text-xs text-slate-300">
-                Type locations with real-time Google Maps suggestions, choose routes, and pick stopping points.
+                Define route path through multiple via villages, select stops, and immediately assign to bus & driver.
               </p>
             </div>
           </div>
@@ -449,7 +550,7 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
 
         {/* 2-Column Body */}
         <div className="grid grid-cols-1 lg:grid-cols-12 flex-1 overflow-hidden">
-          {/* LEFT COLUMN: Search, Route Selection, Stops (5 cols) */}
+          {/* LEFT COLUMN: Search, Via Points, Route Selection, Stops, Assignment (5 cols) */}
           <div className="lg:col-span-5 p-5 overflow-y-auto border-r border-slate-200 space-y-4 bg-slate-50/50">
             {/* Status & Error Alerts */}
             {errorMessage && (
@@ -469,23 +570,23 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
               </div>
             )}
 
-            {/* STEP 1: Origin & Destination with Google Maps Autocomplete */}
+            {/* STEP 1: Origin, Multiple Via Points & Destination */}
             <div className="card p-4 space-y-3 bg-white shadow-xs border border-slate-200">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-xs font-black text-navy-900">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-navy-900 text-[10px] text-white font-bold">1</span>
-                  <span>Set Origin & Destination</span>
+                  <span>Route Path & Via Points</span>
                 </div>
-                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                  Google Autocomplete
+                <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
+                  Multiple Waypoints
                 </span>
               </div>
 
               <div className="space-y-3">
-                {/* Start Location Input */}
+                {/* 1. Origin Input (A) */}
                 <GooglePlacesSearchInput
-                  label="Start Location / Village Name"
-                  placeholder="e.g. Chandragiri, Pakala, SV University..."
+                  label="Start Location (Origin A)"
+                  placeholder="e.g. Chandragiri, Pakala, Tirupati..."
                   value={startQuery}
                   onChange={(val) => {
                     setStartQuery(val);
@@ -502,25 +603,106 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
                   isPickingOnMap={pickingMode === 'start'}
                 />
 
-                {/* Destination Input */}
-                <GooglePlacesSearchInput
-                  label="Destination / College Campus"
-                  placeholder="e.g. SV College, Main Campus, Tirupati Station..."
-                  value={endQuery}
-                  onChange={(val) => {
-                    setEndQuery(val);
-                    if (!val) setEndPlace(null);
-                  }}
-                  onSelectPlace={(place) => {
-                    setEndPlace(place);
-                    setEndQuery(place.name);
-                    setStatusMessage(`Destination set to: ${place.name}`);
-                  }}
-                  iconType="destination"
-                  required
-                  onPickOnMap={() => setPickingMode(pickingMode === 'end' ? 'none' : 'end')}
-                  isPickingOnMap={pickingMode === 'end'}
-                />
+                {/* 2. Multiple Via Points Section */}
+                <div className="space-y-2 pt-1 border-t border-slate-100">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                      <Milestone className="h-3.5 w-3.5 text-purple-600" />
+                      <span>Via Points (Route must go through these villages)</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleAddViaPoint}
+                      className="text-purple-700 hover:text-purple-800 text-[11px] font-bold flex items-center gap-1 bg-purple-50 px-2 py-0.5 rounded-lg border border-purple-200"
+                    >
+                      <Plus className="h-3 w-3" />
+                      <span>Add Via Point</span>
+                    </button>
+                  </div>
+
+                  {viaPoints.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 italic bg-slate-50 p-2 rounded-xl">
+                      Optional: Click "+ Add Via Point" to force the bus route through specific villages or junctions (e.g. Narasingapuram, A.Rangampet).
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {viaPoints.map((vp, idx) => (
+                        <div key={vp.id} className="relative rounded-2xl bg-purple-50/40 p-2.5 border border-purple-200">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-purple-800 flex items-center gap-1">
+                              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-purple-700 text-white text-[9px]">
+                                {idx + 1}
+                              </span>
+                              Via Point #{idx + 1}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              {idx > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveViaPoint(idx, 'up')}
+                                  className="p-1 text-slate-400 hover:text-slate-700"
+                                  title="Move up"
+                                >
+                                  <ArrowUp className="h-3 w-3" />
+                                </button>
+                              )}
+                              {idx < viaPoints.length - 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveViaPoint(idx, 'down')}
+                                  className="p-1 text-slate-400 hover:text-slate-700"
+                                  title="Move down"
+                                >
+                                  <ArrowDown className="h-3 w-3" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveViaPoint(idx)}
+                                className="p-1 text-slate-400 hover:text-red-600"
+                                title="Remove via point"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <GooglePlacesSearchInput
+                            placeholder={`e.g. Village / junction for Via #${idx + 1}...`}
+                            value={vp.query}
+                            onChange={(val) => handleUpdateViaPoint(idx, val, null)}
+                            onSelectPlace={(place) => handleUpdateViaPoint(idx, place.name, place)}
+                            iconType="stop"
+                            onPickOnMap={() => setPickingMode(pickingMode === `via-${idx}` ? 'none' : `via-${idx}`)}
+                            isPickingOnMap={pickingMode === `via-${idx}`}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. Destination Input (B) */}
+                <div className="pt-1 border-t border-slate-100">
+                  <GooglePlacesSearchInput
+                    label="Destination / College Campus (Terminal B)"
+                    placeholder="e.g. SV College, Main Campus, Tirupati Station..."
+                    value={endQuery}
+                    onChange={(val) => {
+                      setEndQuery(val);
+                      if (!val) setEndPlace(null);
+                    }}
+                    onSelectPlace={(place) => {
+                      setEndPlace(place);
+                      setEndQuery(place.name);
+                      setStatusMessage(`Destination set to: ${place.name}`);
+                    }}
+                    iconType="destination"
+                    required
+                    onPickOnMap={() => setPickingMode(pickingMode === 'end' ? 'none' : 'end')}
+                    isPickingOnMap={pickingMode === 'end'}
+                  />
+                </div>
 
                 <button
                   type="button"
@@ -531,12 +713,12 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
                   {isComputing ? (
                     <>
                       <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                      <span>Computing Google Driving Routes...</span>
+                      <span>Computing Driving Path via All Points...</span>
                     </>
                   ) : (
                     <>
                       <Search className="h-4 w-4" />
-                      <span>Find & Calculate Routes</span>
+                      <span>Calculate Route Passing Through Via Points</span>
                     </>
                   )}
                 </button>
@@ -605,19 +787,18 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
               </div>
             )}
 
-            {/* STEP 3: Stopping Points Selection */}
+            {/* STEP 3: Stopping Points Selection (Passenger Bus Stops) */}
             {startPlace && endPlace && (
               <div className="card p-4 space-y-3 bg-white shadow-xs border border-slate-200">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 text-xs font-black text-navy-900">
                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-navy-900 text-[10px] text-white font-bold">3</span>
-                    <span>Select Stopping Points (Bus Stops)</span>
+                    <span>Passenger Stopping Points ({stops.length} Stops)</span>
                   </div>
-                  <span className="text-[11px] font-bold text-slate-500">{stops.length} Total</span>
                 </div>
 
                 <div className="text-[11px] text-slate-600 bg-amber-50 p-2.5 rounded-xl border border-amber-200 leading-tight">
-                  💡 Type below with autocomplete or <strong>click anywhere on the Google Map</strong> to drop a bus stop directly along the road!
+                  💡 Your Start, Via Points, and Destination are sequenced below. Add more boarding stops or <strong>click directly on the Google Map</strong>!
                 </div>
 
                 {/* Add Stop with Autocomplete */}
@@ -643,7 +824,7 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
                     className="w-full rounded-xl bg-navy-800 hover:bg-navy-900 text-white py-2 text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 transition-colors shadow-2xs"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    <span>Add Stop to Route</span>
+                    <span>Add Stop to Route Sequence</span>
                   </button>
                 </div>
 
@@ -676,7 +857,6 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
                           className="flex-1 font-semibold text-slate-800 bg-transparent border-0 focus:ring-0 p-0 text-xs focus:underline"
                         />
 
-                        {/* Controls for intermediate stops */}
                         {!isStart && !isEnd && (
                           <div className="flex items-center gap-1 shrink-0">
                             {idx > 1 && (
@@ -722,15 +902,20 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
               </div>
             )}
 
-            {/* STEP 4: Route Name & Confirmation */}
+            {/* STEP 4: Route Name & Direct Driver Handover Assignment */}
             {startPlace && endPlace && (
               <div className="card p-4 space-y-3 bg-white shadow-xs border border-slate-200">
-                <div className="flex items-center gap-1.5 text-xs font-black text-navy-900">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-navy-900 text-[10px] text-white font-bold">4</span>
-                  <span>Save Campus Route</span>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-black text-navy-900">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-navy-900 text-[10px] text-white font-bold">4</span>
+                    <span>Route Identity & Driver Handover</span>
+                  </div>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    Direct Handover
+                  </span>
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 mb-1">Route Name *</label>
                     <input
@@ -738,7 +923,7 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
                       required
                       value={routeName}
                       onChange={(e) => setRouteName(e.target.value)}
-                      placeholder="e.g. Route 1 - Chandragiri to Campus Express"
+                      placeholder="e.g. Route 1 - Chandragiri to Campus via Narasingapuram"
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:border-purple-600 focus:outline-none"
                     />
                   </div>
@@ -749,9 +934,51 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
                       type="text"
                       value={routeDescription}
                       onChange={(e) => setRouteDescription(e.target.value)}
-                      placeholder="e.g. Daily morning and evening transit via scheduled stops"
+                      placeholder="e.g. Regular college transit via scheduled stops"
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:border-purple-600 focus:outline-none"
                     />
+                  </div>
+
+                  {/* Immediate Bus & Driver Assignment Pickers */}
+                  <div className="rounded-2xl bg-slate-50 p-3 border border-slate-200 space-y-2.5">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-navy-900">
+                      <UserCheck className="h-4 w-4 text-purple-600" />
+                      <span>Assign Bus & Driver Now (Optional)</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1">Select Bus</label>
+                        <select
+                          value={selectedBusId}
+                          onChange={(e) => setSelectedBusId(e.target.value)}
+                          className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-purple-600 focus:outline-none"
+                        >
+                          <option value="">-- No Bus (Assign Later) --</option>
+                          {buses.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.number} ({b.capacity || 45} Seats)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1">Select Driver</label>
+                        <select
+                          value={selectedDriverId}
+                          onChange={(e) => setSelectedDriverId(e.target.value)}
+                          className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-purple-600 focus:outline-none"
+                        >
+                          <option value="">-- No Driver (Assign Later) --</option>
+                          {drivers.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.name} ({d.email})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="pt-2 flex items-center gap-2">
@@ -770,7 +997,7 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
                       className="flex-1 btn-primary bg-emerald-600 hover:bg-emerald-700 text-xs py-2.5 font-bold shadow-md flex items-center justify-center gap-1.5"
                     >
                       <CheckCircle2 className="h-4 w-4" />
-                      <span>Save & Create Route</span>
+                      <span>Save & Assign Route</span>
                     </button>
                   </div>
                 </div>
@@ -819,7 +1046,12 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
               <div className="absolute top-4 left-4 z-20 bg-purple-700 text-white text-xs px-3.5 py-2 rounded-2xl shadow-xl border border-purple-400 flex items-center gap-2 animate-bounce">
                 <Crosshair className="h-4 w-4 text-amber-300" />
                 <span className="font-bold">
-                  Click anywhere on the map to set {pickingMode === 'start' ? 'Start Location (A)' : 'Destination (B)'}
+                  Click anywhere on the map to set{' '}
+                  {pickingMode === 'start'
+                    ? 'Start Location (A)'
+                    : pickingMode === 'end'
+                    ? 'Destination (B)'
+                    : `Via Point #${parseInt(pickingMode.replace('via-', ''), 10) + 1}`}
                 </span>
                 <button
                   type="button"
@@ -832,7 +1064,7 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
             ) : (
               <div className="absolute bottom-4 left-4 z-20 bg-navy-900/85 backdrop-blur-md text-white text-[11px] px-3.5 py-2 rounded-xl shadow-lg border border-white/10 flex items-center gap-2">
                 <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Click anywhere on the road to place a bus stop marker</span>
+                <span>Click anywhere on the road to place a passenger bus stop</span>
               </div>
             )}
 
@@ -913,6 +1145,28 @@ export default function RouteInitiatorModal({ isOpen, onClose, onSaveRoute }) {
                   </Popup>
                 </Marker>
               )}
+
+              {/* Via Points Markers */}
+              {viaPoints.filter(v => v.place).map((vp, i) => (
+                <Marker
+                  key={vp.id}
+                  position={[vp.place.lat, vp.place.lng]}
+                  icon={viaIcon(i + 1)}
+                >
+                  <Tooltip direction="top" offset={[0, -14]} permanent>
+                    <span className="font-bold text-[11px] text-purple-900">
+                      Via #{i + 1}: {vp.place.name}
+                    </span>
+                  </Tooltip>
+                  <Popup>
+                    <div className="p-1 space-y-0.5">
+                      <div className="text-[10px] font-black text-purple-700 uppercase">Via Point #{i + 1}</div>
+                      <div className="font-bold text-xs text-navy-900">{vp.place.name}</div>
+                      <div className="text-[10px] text-slate-500">{vp.place.secondary}</div>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
 
               {/* Destination Marker (B) */}
               {endPlace && (

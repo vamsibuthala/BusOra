@@ -120,27 +120,50 @@ export default function DriverDashboard({ user }) {
     setGpsStatus('off');
   };
 
-  // Drive Simulator for instant testing without moving physically
+  // Drive Simulator for moving the bus smoothly along the assigned route
   const startSimulation = () => {
-    if (!driverData?.bus?.route?.stops?.length) return;
+    const route = driverData?.bus?.route;
+    const pathCoords = route?.path && route.path.length > 1 ? route.path : null;
+    const routeStops = route?.stops && route.stops.length > 0 ? route.stops : null;
+
+    if (!pathCoords && !routeStops) return;
     setIsSimulating(true);
     setGpsStatus('simulating');
 
-    const routeStops = driverData.bus.route.stops;
-    simIntervalRef.current = setInterval(() => {
-      const idx = simStepRef.current % routeStops.length;
-      const targetStop = routeStops[idx];
-      const nextStop = routeStops[(idx + 1) % routeStops.length];
+    // Build complete trajectory coordinates along the route
+    let trajectory = [];
+    if (pathCoords && pathCoords.length > 1) {
+      trajectory = pathCoords;
+    } else if (routeStops && routeStops.length > 1) {
+      // Interpolate 8 smooth points between each consecutive stop
+      for (let i = 0; i < routeStops.length - 1; i++) {
+        const s1 = routeStops[i];
+        const s2 = routeStops[i + 1];
+        for (let step = 0; step < 8; step++) {
+          const factor = step / 8;
+          trajectory.push([
+            s1.lat + (s2.lat - s1.lat) * factor,
+            s1.lng + (s2.lng - s1.lng) * factor,
+          ]);
+        }
+      }
+      const last = routeStops[routeStops.length - 1];
+      trajectory.push([last.lat, last.lng]);
+    } else if (routeStops && routeStops.length === 1) {
+      trajectory = [[routeStops[0].lat, routeStops[0].lng]];
+    }
 
-      // Jitter or intermediate step
-      const stepFactor = 0.4;
-      const simLat = targetStop.lat + (nextStop.lat - targetStop.lat) * stepFactor;
-      const simLng = targetStop.lng + (nextStop.lng - targetStop.lng) * stepFactor;
-      const simSpeed = 10; // ~36 km/h
+    if (trajectory.length === 0) return;
+
+    simIntervalRef.current = setInterval(() => {
+      const idx = simStepRef.current % trajectory.length;
+      const [simLat, simLng] = trajectory[idx];
+      // realistic transit road speed: ~38 km/h (10.5 m/s)
+      const simSpeed = 10.5;
 
       sendGpsLocation(simLat, simLng, simSpeed);
       simStepRef.current += 1;
-    }, 4000);
+    }, 3000);
   };
 
   const stopSimulation = () => {
@@ -157,8 +180,9 @@ export default function DriverDashboard({ user }) {
       setErrorMessage('');
       const trip = await apiRequest('/driver/trip/start', 'POST');
       setActiveTrip(trip);
-      setStatusMessage('Trip started! Live GPS broadcasting is active.');
-      startSimulation(); // start simulator so tester sees bus move immediately
+      setStatusMessage('Trip started! Live GPS broadcasting is active on assigned route.');
+      startGpsWatch(); // physical phone GPS
+      startSimulation(); // road trajectory simulation
     } catch (err) {
       setErrorMessage(err.message);
     }
