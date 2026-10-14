@@ -24,6 +24,7 @@ export default function GooglePlacesSearchInput({
   required = false,
   onPickOnMap = null,
   isPickingOnMap = false,
+  biasCoords = null, // { lat, lng } from starting point
 }) {
   const [query, setQuery] = useState(value);
   const [suggestions, setSuggestions] = useState([]);
@@ -50,6 +51,31 @@ export default function GooglePlacesSearchInput({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const fetchSuggestions = async (searchTerm) => {
+    setIsLoading(true);
+    try {
+      const results = await searchLocationSuggestions(searchTerm, biasCoords || {});
+      setSuggestions(results);
+      setIsOpen(results.length > 0);
+      setHighlightedIndex(-1);
+    } catch (err) {
+      console.error('Failed to get suggestions:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleFocus = () => {
+    if (suggestions.length > 0) {
+      setIsOpen(true);
+      return;
+    }
+    // If biasCoords are provided (e.g. for via points), show nearest villages right away!
+    if (biasCoords && typeof biasCoords.lat === 'number' && typeof biasCoords.lng === 'number') {
+      fetchSuggestions(query || '');
+    }
+  };
+
   // Fetch suggestions when query changes (with 150ms debounce)
   const handleInputChange = (e) => {
     const val = e.target.value;
@@ -61,23 +87,19 @@ export default function GooglePlacesSearchInput({
     }
 
     if (!val || val.trim().length < 1) {
-      setSuggestions([]);
-      setIsOpen(false);
+      if (biasCoords && typeof biasCoords.lat === 'number' && typeof biasCoords.lng === 'number') {
+        debounceTimerRef.current = setTimeout(() => {
+          fetchSuggestions('');
+        }, 100);
+      } else {
+        setSuggestions([]);
+        setIsOpen(false);
+      }
       return;
     }
 
-    setIsLoading(true);
-    debounceTimerRef.current = setTimeout(async () => {
-      try {
-        const results = await searchLocationSuggestions(val);
-        setSuggestions(results);
-        setIsOpen(results.length > 0);
-        setHighlightedIndex(-1);
-      } catch (err) {
-        console.error('Failed to get suggestions:', err);
-      } finally {
-        setIsLoading(false);
-      }
+    debounceTimerRef.current = setTimeout(() => {
+      fetchSuggestions(val);
     }, 150);
   };
 
@@ -101,7 +123,7 @@ export default function GooglePlacesSearchInput({
         e.preventDefault();
         // If user pressed enter, resolve query immediately
         if (query.trim()) {
-          searchLocationSuggestions(query).then((res) => {
+          searchLocationSuggestions(query, biasCoords || {}).then((res) => {
             if (res.length > 0) handleSelect(res[0]);
           });
         }
@@ -202,9 +224,8 @@ export default function GooglePlacesSearchInput({
           value={query}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          onFocus={() => {
-            if (suggestions.length > 0) setIsOpen(true);
-          }}
+          onFocus={handleFocus}
+          onClick={handleFocus}
           placeholder={placeholder}
           className="w-full bg-transparent px-3 py-2.5 text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none"
         />
@@ -230,9 +251,12 @@ export default function GooglePlacesSearchInput({
       {/* Floating Google Maps-Style Autocomplete Suggestions Dropdown */}
       {isOpen && suggestions.length > 0 && (
         <div className="absolute left-0 right-0 top-full z-50 mt-1.5 max-h-64 overflow-y-auto rounded-2xl bg-white shadow-2xl border border-slate-200 py-1.5 animate-fade-in">
-          <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-            <span>Google Maps Place Suggestions</span>
-            <span>{suggestions.length} matches</span>
+          <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between border-b border-slate-100 mb-1">
+            <span className="flex items-center gap-1 text-purple-700">
+              <Compass className="h-3 w-3" />
+              {biasCoords ? 'Nearby Villages & Stops (from Start)' : 'Google Maps Place Suggestions'}
+            </span>
+            <span>{suggestions.length} suggestions</span>
           </div>
 
           {suggestions.map((item, idx) => {

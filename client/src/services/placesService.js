@@ -111,7 +111,6 @@ export const VERIFIED_PLACES = [
     name: 'Madanapalle Institute of Technology & Science (MITS)',
     secondary: 'Angallu, Madanapalle, Andhra Pradesh',
     lat: 13.6280,
-    78.4790: 78.4790,
     lng: 78.4790,
     type: 'college',
     keywords: ['mits', 'madanapalle institute', 'angallu', 'madanapalle']
@@ -445,11 +444,44 @@ function expandQuery(q) {
   return cleaned;
 }
 
+export const kmDistance = (a, b) => {
+  if (!a || !b || typeof a.lat !== 'number' || typeof b.lat !== 'number') return null;
+  const r = (x) => (x * Math.PI) / 180;
+  const d = r(b.lat - a.lat);
+  const e = r(b.lng - a.lng);
+  return 12742 * Math.asin(Math.sqrt(Math.sin(d / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(e / 2) ** 2));
+};
+
 // Search locations with instant Google Maps-style autocomplete suggestions
 export async function searchLocationSuggestions(query, options = {}) {
-  if (!query || !query.trim()) return [];
-  const rawQuery = query.trim();
+  const hasOriginBias = typeof options?.lat === 'number' && typeof options?.lng === 'number';
+  const rawQuery = String(query || '').trim();
   const lowerQuery = rawQuery.toLowerCase();
+
+  // If query is empty but origin bias is present (e.g. user focused on Via Point input):
+  // Return the closest verified villages and transit stops starting from the origin!
+  if (!rawQuery) {
+    if (hasOriginBias) {
+      return VERIFIED_PLACES
+        .map((p) => {
+          const d = kmDistance(p, { lat: options.lat, lng: options.lng }) || 999;
+          return {
+            id: p.id,
+            name: p.name,
+            secondary: `${d.toFixed(1)} km from Starting Point • ${p.secondary}`,
+            lat: p.lat,
+            lng: p.lng,
+            type: p.type,
+            source: 'verified',
+            distKm: d,
+          };
+        })
+        .filter((p) => p.distKm > 0.2) // exclude exact starting point
+        .sort((a, b) => a.distKm - b.distKm)
+        .slice(0, 8);
+    }
+    return [];
+  }
 
   // 1. Check if user typed numeric coordinates: "lat, lng" (e.g. "13.6288, 79.4192")
   const coordMatch = rawQuery.match(/^(-?\d+(\.\d+)?)[,\s]+(-?\d+(\.\d+)?)$/);
@@ -469,27 +501,35 @@ export async function searchLocationSuggestions(query, options = {}) {
     }
   }
 
-  // 2. Instant Match against verified regional Gazetteer (0ms response)
-  const localMatches = VERIFIED_PLACES.filter((p) => {
+  // 2. Instant Match against verified regional Gazetteer, sorted by proximity to origin
+  let localMatches = VERIFIED_PLACES.filter((p) => {
     if (p.name.toLowerCase().includes(lowerQuery)) return true;
     if (p.secondary.toLowerCase().includes(lowerQuery)) return true;
     return p.keywords.some((kw) => kw.includes(lowerQuery) || lowerQuery.includes(kw));
-  }).map((p) => ({
-    id: p.id,
-    name: p.name,
-    secondary: p.secondary,
-    lat: p.lat,
-    lng: p.lng,
-    type: p.type,
-    source: 'verified'
-  }));
+  }).map((p) => {
+    const d = hasOriginBias ? kmDistance(p, { lat: options.lat, lng: options.lng }) : null;
+    return {
+      id: p.id,
+      name: p.name,
+      secondary: d !== null ? `${d.toFixed(1)} km from Starting Point • ${p.secondary}` : p.secondary,
+      lat: p.lat,
+      lng: p.lng,
+      type: p.type,
+      source: 'verified',
+      distKm: d !== null ? d : 999,
+    };
+  });
+
+  if (hasOriginBias) {
+    localMatches.sort((a, b) => a.distKm - b.distKm);
+  }
 
   // 3. Fast Online Autocomplete via Photon API (Elasticsearch OpenStreetMap)
   let onlineResults = [];
   try {
     const expanded = expandQuery(rawQuery);
-    const centerLat = options.lat || 13.6288;
-    const centerLng = options.lng || 79.4192;
+    const centerLat = hasOriginBias ? options.lat : 13.6288;
+    const centerLng = hasOriginBias ? options.lng : 79.4192;
 
     const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(expanded)}&lat=${centerLat}&lon=${centerLng}&limit=8`;
     const res = await fetch(photonUrl);
@@ -499,6 +539,7 @@ export async function searchLocationSuggestions(query, options = {}) {
         onlineResults = data.features.map((f, idx) => {
           const props = f.properties || {};
           const [lng, lat] = f.geometry.coordinates || [];
+          const d = hasOriginBias ? kmDistance({ lat, lng }, { lat: options.lat, lng: options.lng }) : null;
 
           // Format secondary location text
           const locationParts = [
@@ -509,16 +550,23 @@ export async function searchLocationSuggestions(query, options = {}) {
             props.country || 'India',
           ].filter(Boolean);
 
+          const distancePrefix = d !== null ? `${d.toFixed(1)} km from Start • ` : '';
+
           return {
             id: `photon-${props.osm_id || idx}-${Date.now()}`,
             name: props.name || props.street || rawQuery,
-            secondary: locationParts.slice(0, 3).join(', ') || 'India',
+            secondary: `${distancePrefix}${locationParts.slice(0, 3).join(', ') || 'India'}`,
             lat: Number(lat),
             lng: Number(lng),
             type: props.osm_value || props.type || 'place',
-            source: 'photon'
+            source: 'photon',
+            distKm: d !== null ? d : 999,
           };
         }).filter(item => item.lat && item.lng);
+
+        if (hasOriginBias) {
+          onlineResults.sort((a, b) => a.distKm - b.distKm);
+        }
       }
     }
   } catch (err) {
@@ -540,7 +588,8 @@ export async function searchLocationSuggestions(query, options = {}) {
             lat: parseFloat(d.lat),
             lng: parseFloat(d.lon),
             type: d.type || 'place',
-            source: 'nominatim'
+            source: 'nominatim',
+            distKm: 999,
           }));
         }
       }
@@ -551,6 +600,10 @@ export async function searchLocationSuggestions(query, options = {}) {
 
   // 5. Merge and deduplicate by proximity / name
   const combined = [...localMatches, ...onlineResults];
+  if (hasOriginBias) {
+    combined.sort((a, b) => a.distKm - b.distKm);
+  }
+
   const seen = new Set();
   const deduped = [];
 
@@ -601,8 +654,8 @@ export async function reverseGeocodeCoord(lat, lng) {
   }
 
   return {
-    name: `Stop at (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
-    secondary: 'Road Coordinate',
+    name: `Location at (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
+    secondary: 'Road Coordinates',
     lat,
     lng,
   };
@@ -612,8 +665,26 @@ export async function reverseGeocodeCoord(lat, lng) {
 export async function computeDrivingRoute(waypoints) {
   if (!waypoints || waypoints.length < 2) return [];
 
-  const coordsStr = waypoints.map((p) => `${p.lng},${p.lat}`).join(';');
-  const url = `https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson&alternatives=true`;
+  // Filter out any invalid or duplicate consecutive waypoints
+  const cleaned = [];
+  for (const wp of waypoints) {
+    if (!wp || typeof wp.lat !== 'number' || typeof wp.lng !== 'number') continue;
+    if (cleaned.length > 0) {
+      const prev = cleaned[cleaned.length - 1];
+      // Skip duplicate coordinates (< 50m apart)
+      if (Math.abs(prev.lat - wp.lat) < 0.0005 && Math.abs(prev.lng - wp.lng) < 0.0005) {
+        continue;
+      }
+    }
+    cleaned.push(wp);
+  }
+
+  if (cleaned.length < 2) return [];
+
+  const coordsStr = cleaned.map((p) => `${p.lng},${p.lat}`).join(';');
+  // Note: alternatives=true is only supported by OSRM for exactly 2 points
+  const hasAlternatives = cleaned.length === 2;
+  const url = `https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson${hasAlternatives ? '&alternatives=true' : ''}`;
 
   try {
     const res = await fetch(url);
@@ -635,12 +706,20 @@ export async function computeDrivingRoute(waypoints) {
   }
 
   // Safe fallback: connect waypoints smoothly
+  let totalKm = 0;
+  for (let i = 0; i < cleaned.length - 1; i++) {
+    const d = kmDistance(cleaned[i], cleaned[i + 1]);
+    if (d) totalKm += d;
+  }
+  const estKm = (totalKm * 1.15).toFixed(1);
+  const estMin = Math.max(Math.round((totalKm * 1.15) / 35 * 60), 5);
+
   return [{
     id: 'route-direct',
     label: 'Direct Transit Corridor',
     via: 'Direct Road Connection',
-    distanceKm: '15.0',
-    durationMin: 22,
-    coordinates: waypoints.map((p) => [p.lat, p.lng]),
+    distanceKm: estKm,
+    durationMin: estMin,
+    coordinates: cleaned.map((p) => [p.lat, p.lng]),
   }];
 }

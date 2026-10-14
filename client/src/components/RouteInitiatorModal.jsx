@@ -72,21 +72,27 @@ const endIcon = createMarkerIcon('#ef4444', 'B');   // Red for Destination (Term
 const viaIcon = (num) => createMarkerIcon('#8b5cf6', `V${num}`, '#ffffff', 26); // Purple for Via points
 const stopIcon = (num) => createMarkerIcon('#0284c7', num, '#ffffff', 28); // Blue for intermediate stops
 
-// Helper to fit bounds smoothly when route, start, or stops update
-function MapBoundsUpdater({ points }) {
+// Helper to fit bounds smoothly ONLY when routes or explicit recenter occurs (prevents snapping during zoom/pan)
+function MapBoundsUpdater({ triggerKey, points }) {
   const map = useMap();
+  const lastKeyRef = useRef(null);
+
   useEffect(() => {
+    if (!triggerKey || triggerKey === lastKeyRef.current) return;
+    lastKeyRef.current = triggerKey;
+
     if (points && points.length > 1) {
       try {
         const bounds = L.latLngBounds(points);
-        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15, animate: true, duration: 0.6 });
       } catch (e) {
         // Bounds calc safety
       }
     } else if (points && points.length === 1) {
-      map.setView(points[0], 14);
+      map.setView(points[0], 14, { animate: true });
     }
-  }, [points, map]);
+  }, [triggerKey, points, map]);
+
   return null;
 }
 
@@ -128,6 +134,9 @@ export default function RouteInitiatorModal({
   const [routeOptions, setRouteOptions] = useState([]);
   const [selectedRouteIdx, setSelectedRouteIdx] = useState(0);
 
+  // Trigger key for map bounds fitting (only updates when route changes or recenter requested)
+  const [fitBoundsTrigger, setFitBoundsTrigger] = useState(1);
+
   // Route identity & Assignment
   const [routeName, setRouteName] = useState('');
   const [routeDescription, setRouteDescription] = useState('');
@@ -152,6 +161,17 @@ export default function RouteInitiatorModal({
 
   if (!isOpen) return null;
 
+  // Helper: Bias suggestions for via points around the previous point or origin
+  const getBiasForVia = (idx) => {
+    if (idx > 0 && viaPoints[idx - 1]?.place) {
+      return { lat: viaPoints[idx - 1].place.lat, lng: viaPoints[idx - 1].place.lng };
+    }
+    if (startPlace) {
+      return { lat: startPlace.lat, lng: startPlace.lng };
+    }
+    return null;
+  };
+
   // Add a new empty via point
   const handleAddViaPoint = () => {
     setViaPoints((prev) => [
@@ -164,11 +184,17 @@ export default function RouteInitiatorModal({
     ]);
   };
 
-  // Update via point query or place
+  // Update via point query or place (immediately triggers route recalculation if place chosen)
   const handleUpdateViaPoint = (idx, query, place = null) => {
     setViaPoints((prev) => {
       const copy = [...prev];
-      copy[idx] = { ...copy[idx], query, place: place || copy[idx].place };
+      copy[idx] = { ...copy[idx], query, place: place !== undefined ? place : copy[idx].place };
+      
+      if (place && startPlace && endPlace) {
+        setTimeout(() => {
+          calculateRoutes(startPlace, endPlace, copy);
+        }, 50);
+      }
       return copy;
     });
   };
@@ -182,13 +208,26 @@ export default function RouteInitiatorModal({
       const temp = copy[idx];
       copy[idx] = copy[targetIdx];
       copy[targetIdx] = temp;
+      if (startPlace && endPlace) {
+        setTimeout(() => {
+          calculateRoutes(startPlace, endPlace, copy);
+        }, 50);
+      }
       return copy;
     });
   };
 
   // Remove via point
   const handleRemoveViaPoint = (idx) => {
-    setViaPoints((prev) => prev.filter((_, i) => i !== idx));
+    setViaPoints((prev) => {
+      const filtered = prev.filter((_, i) => i !== idx);
+      if (startPlace && endPlace) {
+        setTimeout(() => {
+          calculateRoutes(startPlace, endPlace, filtered);
+        }, 50);
+      }
+      return filtered;
+    });
   };
 
   // Calculate driving routes through Start -> Via Points -> End
@@ -200,21 +239,40 @@ export default function RouteInitiatorModal({
 
     try {
       // Waypoints: origin -> via points -> dest
-      const validViaPlaces = currentViaPoints.map((v) => v.place).filter(Boolean);
-      const intermediateStops = currentStops.length > 0 ? currentStops : [];
+      const validViaPlaces = (currentViaPoints || []).map((v) => v.place).filter(Boolean);
+      const intermediateStops = (currentStops && currentStops.length > 0) ? currentStops : [];
 
-      // Combine intermediate waypoints: via points + additional passenger stops
+      // Combine waypoints in natural geographic route order: origin -> via points -> extra stops -> dest
       const allWaypoints = [origin, ...validViaPlaces, ...intermediateStops, dest];
       const routes = await computeDrivingRoute(allWaypoints);
       setRouteOptions(routes);
       setSelectedRouteIdx(0);
+      setFitBoundsTrigger((prev) => prev + 1);
 
-      // Auto-populate route name if empty
+      // Keep passenger stops sequence in sync with the route
+      const newStops = [
+        { id: 'stop-origin', name: origin.name, lat: origin.lat, lng: origin.lng, order: 1 },
+        ...validViaPlaces.map((vp, i) => ({
+          id: `stop-via-${vp.id || i + 1}`,
+          name: vp.name,
+          lat: vp.lat,
+          lng: vp.lng,
+          order: i + 2,
+        })),
+        ...intermediateStops.map((st, i) => ({
+          ...st,
+          order: validViaPlaces.length + 2 + i,
+        })),
+        { id: 'stop-dest', name: dest.name, lat: dest.lat, lng: dest.lng, order: validViaPlaces.length + intermediateStops.length + 2 },
+      ];
+      setStops(newStops);
+
+      // Auto-populate route name if empty or generic
       const viaText = validViaPlaces.length > 0 ? ` via ${validViaPlaces.map(v => v.name).join(', ')}` : '';
-      if (!routeName) {
+      if (!routeName || routeName.includes('to')) {
         setRouteName(`${origin.name} to ${dest.name}${viaText}`);
       }
-      if (!routeDescription) {
+      if (!routeDescription || routeDescription.includes('transit corridor')) {
         setRouteDescription(`Campus transit corridor from ${origin.name} to ${dest.name}${viaText}.`);
       }
 
@@ -223,6 +281,63 @@ export default function RouteInitiatorModal({
       setErrorMessage(err.message || 'Error calculating routes.');
     } finally {
       setIsComputing(false);
+    }
+  };
+
+  // Drag handler for Starting Point Marker (A)
+  const handleStartDragEnd = async (e) => {
+    const latlng = e.target.getLatLng();
+    setStatusMessage('Relocating Starting Point (A)...');
+    const geo = await reverseGeocodeCoord(latlng.lat, latlng.lng);
+    setStartPlace(geo);
+    setStartQuery(geo.name);
+    setStatusMessage(`Starting Point (A) updated to: ${geo.name}`);
+    if (endPlace) {
+      await calculateRoutes(geo, endPlace, viaPoints);
+    }
+  };
+
+  // Drag handler for Destination Marker (B)
+  const handleEndDragEnd = async (e) => {
+    const latlng = e.target.getLatLng();
+    setStatusMessage('Relocating Destination (B)...');
+    const geo = await reverseGeocodeCoord(latlng.lat, latlng.lng);
+    setEndPlace(geo);
+    setEndQuery(geo.name);
+    setStatusMessage(`Destination (B) updated to: ${geo.name}`);
+    if (startPlace) {
+      await calculateRoutes(startPlace, geo, viaPoints);
+    }
+  };
+
+  // Drag handler for Via Point Markers
+  const handleViaDragEnd = async (e, idx) => {
+    const latlng = e.target.getLatLng();
+    setStatusMessage(`Relocating Via Point #${idx + 1}...`);
+    const geo = await reverseGeocodeCoord(latlng.lat, latlng.lng);
+    const updatedVias = [...viaPoints];
+    updatedVias[idx] = { ...updatedVias[idx], place: geo, query: geo.name };
+    setViaPoints(updatedVias);
+    setStatusMessage(`Via Point #${idx + 1} updated to: ${geo.name}`);
+    if (startPlace && endPlace) {
+      await calculateRoutes(startPlace, endPlace, updatedVias);
+    }
+  };
+
+  // Drag handler for intermediate bus stops
+  const handleStopDragEnd = async (e, stopIdx) => {
+    const latlng = e.target.getLatLng();
+    const geo = await reverseGeocodeCoord(latlng.lat, latlng.lng);
+    const updatedStops = [...stops];
+    if (updatedStops[stopIdx]) {
+      updatedStops[stopIdx] = {
+        ...updatedStops[stopIdx],
+        lat: latlng.lat,
+        lng: latlng.lng,
+        name: geo.name,
+      };
+      setStops(updatedStops);
+      setStatusMessage(`Stop #${stopIdx} moved to: ${geo.name}`);
     }
   };
 
@@ -355,6 +470,9 @@ export default function RouteInitiatorModal({
       setStartQuery(geo.name);
       setPickingMode('none');
       setStatusMessage(`Start location set to: ${geo.name}`);
+      if (endPlace) {
+        await calculateRoutes(geo, endPlace, viaPoints);
+      }
       return;
     }
 
@@ -364,6 +482,9 @@ export default function RouteInitiatorModal({
       setEndQuery(geo.name);
       setPickingMode('none');
       setStatusMessage(`Destination set to: ${geo.name}`);
+      if (startPlace) {
+        await calculateRoutes(startPlace, geo, viaPoints);
+      }
       return;
     }
 
@@ -596,6 +717,9 @@ export default function RouteInitiatorModal({
                     setStartPlace(place);
                     setStartQuery(place.name);
                     setStatusMessage(`Start set to: ${place.name}`);
+                    if (endPlace) {
+                      calculateRoutes(place, endPlace, viaPoints);
+                    }
                   }}
                   iconType="origin"
                   required
@@ -673,6 +797,7 @@ export default function RouteInitiatorModal({
                             onChange={(val) => handleUpdateViaPoint(idx, val, null)}
                             onSelectPlace={(place) => handleUpdateViaPoint(idx, place.name, place)}
                             iconType="stop"
+                            biasCoords={getBiasForVia(idx)}
                             onPickOnMap={() => setPickingMode(pickingMode === `via-${idx}` ? 'none' : `via-${idx}`)}
                             isPickingOnMap={pickingMode === `via-${idx}`}
                           />
@@ -696,6 +821,9 @@ export default function RouteInitiatorModal({
                       setEndPlace(place);
                       setEndQuery(place.name);
                       setStatusMessage(`Destination set to: ${place.name}`);
+                      if (startPlace) {
+                        calculateRoutes(startPlace, place, viaPoints);
+                      }
                     }}
                     iconType="destination"
                     required
@@ -1039,6 +1167,17 @@ export default function RouteInitiatorModal({
               >
                 Standard
               </button>
+
+              {/* Fit Route / Recenter Button */}
+              <button
+                type="button"
+                onClick={() => setFitBoundsTrigger((prev) => prev + 1)}
+                className="text-[11px] font-bold px-2.5 py-1 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 flex items-center gap-1 transition-all"
+                title="Recenter and fit route in view"
+              >
+                <Crosshair className="h-3.5 w-3.5 text-purple-600" />
+                <span>Fit Route</span>
+              </button>
             </div>
 
             {/* Mode Banner / Instruction Overlay */}
@@ -1062,9 +1201,9 @@ export default function RouteInitiatorModal({
                 </button>
               </div>
             ) : (
-              <div className="absolute bottom-4 left-4 z-20 bg-navy-900/85 backdrop-blur-md text-white text-[11px] px-3.5 py-2 rounded-xl shadow-lg border border-white/10 flex items-center gap-2">
+              <div className="absolute bottom-4 left-4 z-20 bg-navy-900/90 backdrop-blur-md text-white text-[11px] px-3.5 py-2 rounded-xl shadow-lg border border-white/10 flex items-center gap-2">
                 <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Click anywhere on the road to place a passenger bus stop</span>
+                <span>Drag markers (A, B, Via) to adjust route • Click road to drop stop</span>
               </div>
             )}
 
@@ -1081,8 +1220,8 @@ export default function RouteInitiatorModal({
                 url={getTileUrl()}
               />
 
-              {/* Fit bounds automatically */}
-              <MapBoundsUpdater points={allMapPoints} />
+              {/* Fit bounds smoothly only when new route is computed or Fit Route is clicked */}
+              <MapBoundsUpdater triggerKey={fitBoundsTrigger} points={allMapPoints} />
 
               {/* Click handler */}
               <MapClickHandler onMapClick={handleMapClick} />
@@ -1131,73 +1270,128 @@ export default function RouteInitiatorModal({
                 </>
               )}
 
-              {/* Origin Marker (A) */}
+              {/* Origin Marker (A) - Draggable */}
               {startPlace && (
-                <Marker position={[startPlace.lat, startPlace.lng]} icon={startIcon}>
+                <Marker
+                  position={[startPlace.lat, startPlace.lng]}
+                  icon={startIcon}
+                  draggable={true}
+                  eventHandlers={{
+                    dragend: handleStartDragEnd,
+                  }}
+                >
+                  <Tooltip direction="top" offset={[0, -18]} permanent>
+                    <span className="font-black text-[11px] text-emerald-800 bg-white/95 px-1.5 py-0.5 rounded-lg shadow-sm border border-emerald-200">
+                      A: {startPlace.name} (Drag to change)
+                    </span>
+                  </Tooltip>
                   <Popup>
                     <div className="p-1 space-y-0.5">
-                      <div className="text-[10px] font-black text-emerald-600 uppercase">Origin Terminal (A)</div>
+                      <div className="text-[10px] font-black text-emerald-600 uppercase flex items-center justify-between">
+                        <span>Origin Terminal (A)</span>
+                        <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-bold">Draggable</span>
+                      </div>
                       <div className="font-bold text-xs text-navy-900">{startPlace.name}</div>
                       {startPlace.secondary && (
                         <div className="text-[10px] text-slate-500">{startPlace.secondary}</div>
                       )}
+                      <div className="text-[10px] text-emerald-700 font-semibold pt-1">
+                        Drag this pin anywhere to change the starting point!
+                      </div>
                     </div>
                   </Popup>
                 </Marker>
               )}
 
-              {/* Via Points Markers */}
+              {/* Via Points Markers - Draggable */}
               {viaPoints.filter(v => v.place).map((vp, i) => (
                 <Marker
                   key={vp.id}
                   position={[vp.place.lat, vp.place.lng]}
                   icon={viaIcon(i + 1)}
+                  draggable={true}
+                  eventHandlers={{
+                    dragend: (e) => handleViaDragEnd(e, i),
+                  }}
                 >
-                  <Tooltip direction="top" offset={[0, -14]} permanent>
-                    <span className="font-bold text-[11px] text-purple-900">
-                      Via #{i + 1}: {vp.place.name}
+                  <Tooltip direction="top" offset={[0, -16]} permanent>
+                    <span className="font-bold text-[11px] text-purple-900 bg-white/95 px-1.5 py-0.5 rounded-lg shadow-sm border border-purple-200">
+                      Via #{i + 1}: {vp.place.name} (Draggable)
                     </span>
                   </Tooltip>
                   <Popup>
                     <div className="p-1 space-y-0.5">
-                      <div className="text-[10px] font-black text-purple-700 uppercase">Via Point #{i + 1}</div>
+                      <div className="text-[10px] font-black text-purple-700 uppercase flex items-center justify-between">
+                        <span>Via Point #{i + 1}</span>
+                        <span className="text-[9px] bg-purple-100 text-purple-800 px-1 py-0.2 rounded font-bold">Draggable</span>
+                      </div>
                       <div className="font-bold text-xs text-navy-900">{vp.place.name}</div>
-                      <div className="text-[10px] text-slate-500">{vp.place.secondary}</div>
+                      {vp.place.secondary && (
+                        <div className="text-[10px] text-slate-500">{vp.place.secondary}</div>
+                      )}
+                      <div className="text-[10px] text-purple-700 font-semibold pt-1">
+                        Drag pin to reposition via point on road!
+                      </div>
                     </div>
                   </Popup>
                 </Marker>
               ))}
 
-              {/* Destination Marker (B) */}
+              {/* Destination Marker (B) - Draggable */}
               {endPlace && (
-                <Marker position={[endPlace.lat, endPlace.lng]} icon={endIcon}>
+                <Marker
+                  position={[endPlace.lat, endPlace.lng]}
+                  icon={endIcon}
+                  draggable={true}
+                  eventHandlers={{
+                    dragend: handleEndDragEnd,
+                  }}
+                >
+                  <Tooltip direction="top" offset={[0, -18]} permanent>
+                    <span className="font-black text-[11px] text-red-800 bg-white/95 px-1.5 py-0.5 rounded-lg shadow-sm border border-red-200">
+                      B: {endPlace.name} (Drag to change)
+                    </span>
+                  </Tooltip>
                   <Popup>
                     <div className="p-1 space-y-0.5">
-                      <div className="text-[10px] font-black text-red-600 uppercase">Destination Terminal (B)</div>
+                      <div className="text-[10px] font-black text-red-600 uppercase flex items-center justify-between">
+                        <span>Destination Terminal (B)</span>
+                        <span className="text-[9px] bg-red-100 text-red-800 px-1 py-0.2 rounded font-bold">Draggable</span>
+                      </div>
                       <div className="font-bold text-xs text-navy-900">{endPlace.name}</div>
                       {endPlace.secondary && (
                         <div className="text-[10px] text-slate-500">{endPlace.secondary}</div>
                       )}
+                      <div className="text-[10px] text-red-700 font-semibold pt-1">
+                        Drag this pin anywhere to change the destination!
+                      </div>
                     </div>
                   </Popup>
                 </Marker>
               )}
 
-              {/* Intermediate Bus Stop Markers (#1, #2, #3...) */}
+              {/* Intermediate Bus Stop Markers (#1, #2, #3...) - Draggable */}
               {stops.slice(1, -1).map((stop, idx) => (
                 <Marker
                   key={stop.id || idx}
                   position={[stop.lat, stop.lng]}
                   icon={stopIcon(idx + 1)}
+                  draggable={true}
+                  eventHandlers={{
+                    dragend: (e) => handleStopDragEnd(e, idx + 1),
+                  }}
                 >
                   <Tooltip direction="top" offset={[0, -15]} permanent>
-                    <span className="font-bold text-[11px] text-slate-800">
+                    <span className="font-bold text-[11px] text-slate-800 bg-white/95 px-1 py-0.5 rounded shadow">
                       #{idx + 1} {stop.name}
                     </span>
                   </Tooltip>
                   <Popup>
                     <div className="p-1 space-y-1">
-                      <div className="text-[10px] font-bold text-sky-600 uppercase">Bus Stop #{idx + 1}</div>
+                      <div className="text-[10px] font-bold text-sky-600 uppercase flex items-center justify-between">
+                        <span>Bus Stop #{idx + 1}</span>
+                        <span className="text-[9px] bg-sky-100 text-sky-800 px-1 py-0.2 rounded font-bold">Draggable</span>
+                      </div>
                       <div className="font-bold text-xs text-navy-900">{stop.name}</div>
                       <div className="text-[10px] text-slate-400 font-mono">
                         {stop.lat.toFixed(4)}, {stop.lng.toFixed(4)}
