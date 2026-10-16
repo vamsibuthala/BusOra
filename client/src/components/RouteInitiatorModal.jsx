@@ -36,7 +36,9 @@ import GooglePlacesSearchInput from './GooglePlacesSearchInput';
 import { 
   searchLocationSuggestions, 
   reverseGeocodeCoord, 
-  computeDrivingRoute 
+  computeDrivingRoute,
+  VERIFIED_PLACES,
+  kmDistance
 } from '../services/placesService';
 
 // Custom Google Maps-style markers for Start, Via points, Stops, and Destination
@@ -71,6 +73,34 @@ const startIcon = createMarkerIcon('#10b981', 'A'); // Green for Start (Origin)
 const endIcon = createMarkerIcon('#ef4444', 'B');   // Red for Destination (Terminal)
 const viaIcon = (num) => createMarkerIcon('#8b5cf6', `V${num}`, '#ffffff', 26); // Purple for Via points
 const stopIcon = (num) => createMarkerIcon('#0284c7', num, '#ffffff', 28); // Blue for intermediate stops
+
+// Small Village Pin Icon for rural roads & hamlets
+const villageMapIcon = L.divIcon({
+  className: 'village-map-pin',
+  html: `
+    <div style="
+      background-color: #ffffff;
+      color: #0f172a;
+      padding: 2px 6px;
+      border-radius: 9999px;
+      font-size: 10px;
+      font-weight: 800;
+      border: 1.5px solid #7c3aed;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      cursor: pointer;
+      white-space: nowrap;
+    ">
+      <span style="font-size: 11px;">🏡</span>
+      <span style="color: #6b21a8; font-size: 9px; font-weight: 900;">Village</span>
+    </div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 14],
+  popupAnchor: [0, -14],
+});
 
 // Helper to fit bounds smoothly ONLY when routes or explicit recenter occurs (prevents snapping during zoom/pan)
 function MapBoundsUpdater({ triggerKey, points }) {
@@ -147,7 +177,8 @@ export default function RouteInitiatorModal({
   const [isComputing, setIsComputing] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  const [mapType, setMapType] = useState('google'); // 'google' | 'satellite' | 'osm'
+  const [mapType, setMapType] = useState('osm'); // Default to 'osm' (Full Village & Rural Roads Detail)
+  const [showVillagePins, setShowVillagePins] = useState(true);
 
   // Pre-select first available bus and driver if available
   useEffect(() => {
@@ -160,6 +191,18 @@ export default function RouteInitiatorModal({
   }, [buses, drivers]);
 
   if (!isOpen) return null;
+
+  // Nearby small villages within regional radius to display as clickable pins on the map
+  const centerPoint = startPlace || { lat: 13.6288, lng: 79.4192 };
+  const nearbyVillages = VERIFIED_PLACES.filter((p) => {
+    if (p.type !== 'village' && p.type !== 'transit_hub' && p.type !== 'landmark') return false;
+    // Don't show pin if already selected as start, end, or in via points
+    if (startPlace && Math.abs(startPlace.lat - p.lat) < 0.001 && Math.abs(startPlace.lng - p.lng) < 0.001) return false;
+    if (endPlace && Math.abs(endPlace.lat - p.lat) < 0.001 && Math.abs(endPlace.lng - p.lng) < 0.001) return false;
+    if (viaPoints.some(v => v.place && Math.abs(v.place.lat - p.lat) < 0.001 && Math.abs(v.place.lng - p.lng) < 0.001)) return false;
+    const d = kmDistance(centerPoint, p);
+    return d !== null && d <= 45;
+  }).slice(0, 50);
 
   // Helper: Bias suggestions for via points around the previous point or origin
   const getBiasForVia = (idx) => {
@@ -182,6 +225,26 @@ export default function RouteInitiatorModal({
         place: null,
       },
     ]);
+  };
+
+  // Quick-add a village pin directly from the map into the bus route
+  const handleAddVillageToRoute = (villagePlace) => {
+    const newVia = {
+      id: `via-vil-${Date.now()}`,
+      query: villagePlace.name,
+      place: {
+        name: villagePlace.name,
+        secondary: villagePlace.secondary,
+        lat: villagePlace.lat,
+        lng: villagePlace.lng,
+      },
+    };
+    const updated = [...viaPoints, newVia];
+    setViaPoints(updated);
+    setStatusMessage(`Added village "${villagePlace.name}" to route.`);
+    if (startPlace && endPlace) {
+      calculateRoutes(startPlace, endPlace, updated);
+    }
   };
 
   // Update via point query or place (immediately triggers route recalculation if place chosen)
@@ -230,20 +293,19 @@ export default function RouteInitiatorModal({
     });
   };
 
-  // Calculate driving routes through Start -> Via Points -> End
-  const calculateRoutes = async (origin, dest, currentViaPoints = [], currentStops = []) => {
+  // Calculate driving routes through Start -> Via Points -> End (follows small village roads)
+  const calculateRoutes = async (origin, dest, currentViaPoints = []) => {
     if (!origin || !dest) return;
     setIsComputing(true);
     setErrorMessage('');
-    setStatusMessage('Computing Google Maps driving road paths through all via points...');
+    setStatusMessage('Computing Google Maps driving road paths through all small villages & routes...');
 
     try {
       // Waypoints: origin -> via points -> dest
       const validViaPlaces = (currentViaPoints || []).map((v) => v.place).filter(Boolean);
-      const intermediateStops = (currentStops && currentStops.length > 0) ? currentStops : [];
 
-      // Combine waypoints in natural geographic route order: origin -> via points -> extra stops -> dest
-      const allWaypoints = [origin, ...validViaPlaces, ...intermediateStops, dest];
+      // Clean sequential waypoint list following physical travel path
+      const allWaypoints = [origin, ...validViaPlaces, dest];
       const routes = await computeDrivingRoute(allWaypoints);
       setRouteOptions(routes);
       setSelectedRouteIdx(0);
@@ -259,11 +321,7 @@ export default function RouteInitiatorModal({
           lng: vp.lng,
           order: i + 2,
         })),
-        ...intermediateStops.map((st, i) => ({
-          ...st,
-          order: validViaPlaces.length + 2 + i,
-        })),
-        { id: 'stop-dest', name: dest.name, lat: dest.lat, lng: dest.lng, order: validViaPlaces.length + intermediateStops.length + 2 },
+        { id: 'stop-dest', name: dest.name, lat: dest.lat, lng: dest.lng, order: validViaPlaces.length + 2 },
       ];
       setStops(newStops);
 
@@ -440,29 +498,22 @@ export default function RouteInitiatorModal({
       setErrorMessage('Please select Start and End locations first.');
       return;
     }
-
-    const newStop = {
-      id: `stop-${Date.now()}`,
-      name: placeToAdd.name,
-      lat: placeToAdd.lat,
-      lng: placeToAdd.lng,
+    const newVia = {
+      id: `via-stop-${Date.now()}`,
+      query: placeToAdd.name,
+      place: placeToAdd,
     };
 
-    const currentStops = [...stops];
-    const insertIdx = currentStops.length > 1 ? currentStops.length - 1 : 1;
-    currentStops.splice(insertIdx, 0, newStop);
-
-    const sequenced = currentStops.map((s, idx) => ({ ...s, order: idx + 1 }));
-    setStops(sequenced);
+    const updated = [...viaPoints, newVia];
+    setViaPoints(updated);
     setStopInputQuery('');
     setSelectedStopPlace(null);
-    setStatusMessage(`Added stop: ${newStop.name}`);
+    setStatusMessage(`Added stop: ${placeToAdd.name}`);
 
-    // Recalculate route through all stops and via points
-    await calculateRoutes(startPlace, endPlace, viaPoints, sequenced.slice(1, -1));
+    await calculateRoutes(startPlace, endPlace, updated);
   };
 
-  // 3. Action: Handle map clicks (for pick on map mode or dropping stops)
+  // 3. Action: Handle map clicks (for pick on map mode or clicking small roads/villages)
   const handleMapClick = async (lat, lng) => {
     if (pickingMode === 'start') {
       const geo = await reverseGeocodeCoord(lat, lng);
@@ -497,31 +548,26 @@ export default function RouteInitiatorModal({
       return;
     }
 
-    // Default: Click to add an intermediate stopping point along the route
+    // Default: Click anywhere on a small village road or junction to add it into the bus route!
     if (!startPlace || !endPlace) {
-      setErrorMessage('Please select Start and End points first.');
+      setErrorMessage('Please select Start and End locations first, then click on any village or small road to route through it.');
       return;
     }
 
-    setStatusMessage('Reverse geocoding clicked point on Google Maps...');
+    setStatusMessage('Reverse geocoding clicked road / village...');
     const geo = await reverseGeocodeCoord(lat, lng);
 
-    const newStop = {
-      id: `stop-${Date.now()}`,
-      name: geo.name,
-      lat,
-      lng,
+    const newVia = {
+      id: `via-road-${Date.now()}`,
+      query: geo.name,
+      place: geo,
     };
 
-    const currentStops = [...stops];
-    const insertIdx = currentStops.length > 1 ? currentStops.length - 1 : 1;
-    currentStops.splice(insertIdx, 0, newStop);
+    const updated = [...viaPoints, newVia];
+    setViaPoints(updated);
+    setStatusMessage(`Added small route point: ${geo.name}`);
 
-    const sequenced = currentStops.map((s, idx) => ({ ...s, order: idx + 1 }));
-    setStops(sequenced);
-    setStatusMessage(`Added stop on map: ${geo.name}`);
-
-    await calculateRoutes(startPlace, endPlace, viaPoints, sequenced.slice(1, -1));
+    await calculateRoutes(startPlace, endPlace, updated);
   };
 
   // Reorder stops
@@ -621,22 +667,25 @@ export default function RouteInitiatorModal({
     ...(activeRoute?.coordinates || []),
   ];
 
-  // Tile layer URL
+  // Tile layer URL supporting high-detail rural & village roads
   const getTileUrl = () => {
     if (mapType === 'satellite') {
-      return 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'; // Google Satellite Hybrid
+      return 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'; // Google Satellite Hybrid (Aerial Village Roads)
     }
     if (mapType === 'google') {
       return 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}'; // Google Roadmap
     }
-    return 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'; // OpenStreetMap
+    if (mapType === 'terrain') {
+      return 'https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}'; // Google Terrain
+    }
+    return 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'; // OpenStreetMap (Full Village & Rural Roads Detail)
   };
 
   const getTileAttribution = () => {
-    if (mapType === 'google' || mapType === 'satellite') {
+    if (mapType === 'google' || mapType === 'satellite' || mapType === 'terrain') {
       return '&copy; Google Maps';
     }
-    return '&copy; OpenStreetMap contributors';
+    return '&copy; OpenStreetMap contributors (Detailed Village Panchayat Roads)';
   };
 
   return (
@@ -1136,10 +1185,22 @@ export default function RouteInitiatorModal({
           {/* RIGHT COLUMN: Interactive Google Maps View (7 cols) */}
           <div className="lg:col-span-7 relative flex flex-col bg-slate-100 min-h-[420px] lg:min-h-full">
             {/* Top Bar: Layer Switcher & Mode indicators */}
-            <div className="absolute top-4 right-4 z-20 flex items-center gap-2 bg-white/95 backdrop-blur-md p-1.5 rounded-2xl shadow-lg border border-slate-200">
-              <span className="text-[11px] font-black text-slate-600 px-2 flex items-center gap-1">
-                <Layers className="h-3.5 w-3.5 text-purple-600" /> View:
+            <div className="absolute top-4 right-4 z-20 flex flex-wrap items-center gap-1.5 bg-white/95 backdrop-blur-md p-1.5 rounded-2xl shadow-lg border border-slate-200">
+              <span className="text-[11px] font-black text-slate-600 px-1.5 flex items-center gap-1">
+                <Layers className="h-3.5 w-3.5 text-purple-600" /> Map:
               </span>
+
+              <button
+                type="button"
+                onClick={() => setMapType('osm')}
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-xl transition-all ${
+                  mapType === 'osm' ? 'bg-purple-700 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+                title="OpenStreetMap with high-detail village panchayat roads, small streets and hamlets"
+              >
+                Rural Roads & Villages
+              </button>
+
               <button
                 type="button"
                 onClick={() => setMapType('google')}
@@ -1149,23 +1210,41 @@ export default function RouteInitiatorModal({
               >
                 Google Roads
               </button>
+
               <button
                 type="button"
                 onClick={() => setMapType('satellite')}
                 className={`text-[11px] font-bold px-2.5 py-1 rounded-xl transition-all ${
                   mapType === 'satellite' ? 'bg-purple-700 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
                 }`}
+                title="Aerial satellite imagery to see real village roads and houses"
               >
-                Google Satellite
+                Satellite (Aerial)
               </button>
+
               <button
                 type="button"
-                onClick={() => setMapType('osm')}
+                onClick={() => setMapType('terrain')}
                 className={`text-[11px] font-bold px-2.5 py-1 rounded-xl transition-all ${
-                  mapType === 'osm' ? 'bg-purple-700 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+                  mapType === 'terrain' ? 'bg-purple-700 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
-                Standard
+                Terrain
+              </button>
+
+              {/* Toggle Village Pins on Map */}
+              <button
+                type="button"
+                onClick={() => setShowVillagePins(!showVillagePins)}
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-xl flex items-center gap-1 transition-all border ${
+                  showVillagePins
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-xs'
+                    : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                }`}
+                title="Show clickable village markers on the map"
+              >
+                <span>🏡</span>
+                <span>{showVillagePins ? `Villages (${nearbyVillages.length})` : 'Show Villages'}</span>
               </button>
 
               {/* Fit Route / Recenter Button */}
@@ -1201,16 +1280,17 @@ export default function RouteInitiatorModal({
                 </button>
               </div>
             ) : (
-              <div className="absolute bottom-4 left-4 z-20 bg-navy-900/90 backdrop-blur-md text-white text-[11px] px-3.5 py-2 rounded-xl shadow-lg border border-white/10 flex items-center gap-2">
+              <div className="absolute bottom-4 left-4 z-20 bg-navy-900/95 backdrop-blur-md text-white text-[11px] px-3.5 py-2 rounded-xl shadow-lg border border-white/10 flex items-center gap-2">
                 <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Drag markers (A, B, Via) to adjust route • Click road to drop stop</span>
+                <span>🏡 Click any village pin or road to add to route • Drag pins (A, B, Via) to adjust</span>
               </div>
             )}
 
-            {/* Interactive Leaflet Map with Google Maps Tiles */}
+            {/* Interactive Leaflet Map with High-Zoom Village & Rural Road Capability */}
             <MapContainer
               center={[13.6288, 79.4192]}
               zoom={13}
+              maxZoom={20}
               scrollWheelZoom={true}
               style={{ height: '100%', width: '100%', minHeight: '480px' }}
               className="z-10 flex-1"
@@ -1218,6 +1298,8 @@ export default function RouteInitiatorModal({
               <TileLayer
                 attribution={getTileAttribution()}
                 url={getTileUrl()}
+                maxZoom={20}
+                maxNativeZoom={19}
               />
 
               {/* Fit bounds smoothly only when new route is computed or Fit Route is clicked */}
@@ -1225,6 +1307,38 @@ export default function RouteInitiatorModal({
 
               {/* Click handler */}
               <MapClickHandler onMapClick={handleMapClick} />
+
+              {/* Clickable Small Village Pins across the region */}
+              {showVillagePins && nearbyVillages.map((v) => (
+                <Marker
+                  key={v.id}
+                  position={[v.lat, v.lng]}
+                  icon={villageMapIcon}
+                >
+                  <Tooltip direction="top" offset={[0, -12]} opacity={0.95}>
+                    <span className="font-extrabold text-[10px] text-purple-950 bg-white/95 px-1 py-0.5 rounded shadow">
+                      🏡 {v.name}
+                    </span>
+                  </Tooltip>
+                  <Popup>
+                    <div className="p-1 space-y-1.5 text-xs max-w-[210px]">
+                      <div className="flex items-center gap-1 font-black text-purple-700 uppercase text-[10px]">
+                        <span>🏡 Regional Village / Stop</span>
+                      </div>
+                      <div className="font-bold text-slate-900 leading-tight">{v.name}</div>
+                      <div className="text-[10px] text-slate-500">{v.secondary}</div>
+                      <button
+                        type="button"
+                        onClick={() => handleAddVillageToRoute(v)}
+                        className="w-full mt-1.5 btn-primary bg-purple-700 hover:bg-purple-800 text-[10px] py-1.5 px-2.5 font-bold flex items-center justify-center gap-1 rounded-xl shadow-xs"
+                      >
+                        <Plus className="h-3 w-3" />
+                        <span>Add Village to Route</span>
+                      </button>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
 
               {/* Alternative Routes rendered in dashed subtle gray */}
               {routeOptions.map((opt, idx) => {
