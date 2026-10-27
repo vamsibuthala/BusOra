@@ -32,7 +32,7 @@ export default function HomePage({ onOpenLogin, onSelectTab }) {
   }, []);
 
   const defaultStops = [
-    { id: 's1', name: 'Main Campus Gate', lat: 13.6288, lng: 79.4192, order: 1 },
+    { id: 's1', name: 'Vemu Institute Main Gate', lat: 13.3420, lng: 79.0830, order: 1 },
     { id: 's2', name: 'Market Complex', lat: 13.635, lng: 79.425, order: 2 },
     { id: 's3', name: 'Central Railway Station', lat: 13.642, lng: 79.43, order: 3 },
     { id: 's4', name: 'North City Terminal', lat: 13.651, lng: 79.438, order: 4 },

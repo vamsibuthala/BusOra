@@ -64,7 +64,7 @@ export default function AdminDashboard({ user }) {
     name: '',
     description: '',
     stops: [
-      { name: 'Campus Main Gate', lat: 13.6288, lng: 79.4192 },
+      { name: 'Vemu Institute Main Gate', lat: 13.3420, lng: 79.0830 },
       { name: 'Station Stop', lat: 13.6350, lng: 79.4250 },
     ],
   });

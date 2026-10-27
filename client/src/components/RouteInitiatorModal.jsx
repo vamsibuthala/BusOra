@@ -74,32 +74,33 @@ const endIcon = createMarkerIcon('#ef4444', 'B');   // Red for Destination (Term
 const viaIcon = (num) => createMarkerIcon('#8b5cf6', `V${num}`, '#ffffff', 26); // Purple for Via points
 const stopIcon = (num) => createMarkerIcon('#0284c7', num, '#ffffff', 28); // Blue for intermediate stops
 
-// Small Village Pin Icon for rural roads & hamlets
-const villageMapIcon = L.divIcon({
-  className: 'village-map-pin',
+// Compact Numbered Village Pin Icon for rural roads & hamlets (so villages don't cover each other or the map)
+const numberedVillageIcon = (num) => L.divIcon({
+  className: 'village-number-pin',
   html: `
     <div style="
-      background-color: #ffffff;
-      color: #0f172a;
-      padding: 2px 6px;
+      background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
+      color: #ffffff;
+      width: 22px;
+      height: 22px;
       border-radius: 9999px;
-      font-size: 10px;
-      font-weight: 800;
-      border: 1.5px solid #7c3aed;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+      font-size: 11px;
+      font-weight: 900;
+      border: 2px solid #ffffff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.35);
       display: flex;
       align-items: center;
-      gap: 3px;
+      justify-content: center;
       cursor: pointer;
-      white-space: nowrap;
+      user-select: none;
+      line-height: 1;
     ">
-      <span style="font-size: 11px;">🏡</span>
-      <span style="color: #6b21a8; font-size: 9px; font-weight: 900;">Village</span>
+      ${num}
     </div>
   `,
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
-  popupAnchor: [0, -14],
+  iconSize: [22, 22],
+  iconAnchor: [11, 11],
+  popupAnchor: [0, -12],
 });
 
 // Helper to fit bounds smoothly ONLY when routes or explicit recenter occurs (prevents snapping during zoom/pan)
@@ -177,8 +178,9 @@ export default function RouteInitiatorModal({
   const [isComputing, setIsComputing] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  const [mapType, setMapType] = useState('osm'); // Default to 'osm' (Full Village & Rural Roads Detail)
+  const [mapType, setMapType] = useState('hot'); // Default to 'hot' (Humanitarian OSM - High Contrast Narrow Village Roads)
   const [showVillagePins, setShowVillagePins] = useState(true);
+  const [showVillageList, setShowVillageList] = useState(false);
 
   // Pre-select first available bus and driver if available
   useEffect(() => {
@@ -192,17 +194,17 @@ export default function RouteInitiatorModal({
 
   if (!isOpen) return null;
 
-  // Nearby small villages within regional radius to display as clickable pins on the map
-  const centerPoint = startPlace || { lat: 13.6288, lng: 79.4192 };
+  // Nearby small villages within regional radius to display as clickable numbered pins on the map
+  const centerPoint = startPlace || endPlace || { lat: 13.3420, lng: 79.0830 };
   const nearbyVillages = VERIFIED_PLACES.filter((p) => {
-    if (p.type !== 'village' && p.type !== 'transit_hub' && p.type !== 'landmark') return false;
+    if (p.type !== 'village' && p.type !== 'transit_hub' && p.type !== 'landmark' && p.type !== 'college') return false;
     // Don't show pin if already selected as start, end, or in via points
     if (startPlace && Math.abs(startPlace.lat - p.lat) < 0.001 && Math.abs(startPlace.lng - p.lng) < 0.001) return false;
     if (endPlace && Math.abs(endPlace.lat - p.lat) < 0.001 && Math.abs(endPlace.lng - p.lng) < 0.001) return false;
     if (viaPoints.some(v => v.place && Math.abs(v.place.lat - p.lat) < 0.001 && Math.abs(v.place.lng - p.lng) < 0.001)) return false;
     const d = kmDistance(centerPoint, p);
-    return d !== null && d <= 45;
-  }).slice(0, 50);
+    return d !== null && d <= 70;
+  }).slice(0, 60);
 
   // Helper: Bias suggestions for via points around the previous point or origin
   const getBiasForVia = (idx) => {
@@ -331,7 +333,7 @@ export default function RouteInitiatorModal({
         setRouteName(`${origin.name} to ${dest.name}${viaText}`);
       }
       if (!routeDescription || routeDescription.includes('transit corridor')) {
-        setRouteDescription(`Campus transit corridor from ${origin.name} to ${dest.name}${viaText}.`);
+        setRouteDescription(`Transit corridor from ${origin.name} to ${dest.name}${viaText} for Vemu Institute of Technology.`);
       }
 
       setStatusMessage(`Found ${routes.length} driving route(s) via ${validViaPlaces.length} via-point(s).`);
@@ -667,10 +669,16 @@ export default function RouteInitiatorModal({
     ...(activeRoute?.coordinates || []),
   ];
 
-  // Tile layer URL supporting high-detail rural & village roads
+  // Tile layer URL supporting high-detail narrow village roads & aerial satellite view
   const getTileUrl = () => {
+    if (mapType === 'hot') {
+      return 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png'; // Humanitarian OSM (Bold High-Contrast Narrow Village Roads & Tracks)
+    }
     if (mapType === 'satellite') {
-      return 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'; // Google Satellite Hybrid (Aerial Village Roads)
+      return 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'; // Google Satellite Hybrid (Aerial visible village roads & alleys)
+    }
+    if (mapType === 'cyclosm') {
+      return 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png'; // CyclOSM (Narrow Lanes & Paths)
     }
     if (mapType === 'google') {
       return 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}'; // Google Roadmap
@@ -678,12 +686,18 @@ export default function RouteInitiatorModal({
     if (mapType === 'terrain') {
       return 'https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}'; // Google Terrain
     }
-    return 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'; // OpenStreetMap (Full Village & Rural Roads Detail)
+    return 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'; // Standard OpenStreetMap
   };
 
   const getTileAttribution = () => {
     if (mapType === 'google' || mapType === 'satellite' || mapType === 'terrain') {
       return '&copy; Google Maps';
+    }
+    if (mapType === 'hot') {
+      return '&copy; OpenStreetMap contributors, Humanitarian OpenStreetMap Team (Narrow Village Roads)';
+    }
+    if (mapType === 'cyclosm') {
+      return '&copy; OpenStreetMap contributors, CyclOSM';
     }
     return '&copy; OpenStreetMap contributors (Detailed Village Panchayat Roads)';
   };
@@ -859,8 +873,8 @@ export default function RouteInitiatorModal({
                 {/* 3. Destination Input (B) */}
                 <div className="pt-1 border-t border-slate-100">
                   <GooglePlacesSearchInput
-                    label="Destination / College Campus (Terminal B)"
-                    placeholder="e.g. SV College, Main Campus, Tirupati Station..."
+                    label="Destination / College (e.g. Vemu Institute of Technology)"
+                    placeholder="e.g. Vemu Institute of Technology, P.Kothakota..."
                     value={endQuery}
                     onChange={(val) => {
                       setEndQuery(val);
@@ -1100,7 +1114,7 @@ export default function RouteInitiatorModal({
                       required
                       value={routeName}
                       onChange={(e) => setRouteName(e.target.value)}
-                      placeholder="e.g. Route 1 - Chandragiri to Campus via Narasingapuram"
+                      placeholder="e.g. Route 1 - Pakala to Vemu Institute of Technology via Damalcheruvu"
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:border-purple-600 focus:outline-none"
                     />
                   </div>
@@ -1111,7 +1125,7 @@ export default function RouteInitiatorModal({
                       type="text"
                       value={routeDescription}
                       onChange={(e) => setRouteDescription(e.target.value)}
-                      placeholder="e.g. Regular college transit via scheduled stops"
+                      placeholder="e.g. Vemu Institute of Technology transit via scheduled village stops"
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:border-purple-600 focus:outline-none"
                     />
                   </div>
@@ -1185,20 +1199,42 @@ export default function RouteInitiatorModal({
           {/* RIGHT COLUMN: Interactive Google Maps View (7 cols) */}
           <div className="lg:col-span-7 relative flex flex-col bg-slate-100 min-h-[420px] lg:min-h-full">
             {/* Top Bar: Layer Switcher & Mode indicators */}
-            <div className="absolute top-4 right-4 z-20 flex flex-wrap items-center gap-1.5 bg-white/95 backdrop-blur-md p-1.5 rounded-2xl shadow-lg border border-slate-200">
+            <div className="absolute top-4 right-4 z-20 flex flex-wrap items-center gap-1.5 bg-white/95 backdrop-blur-md p-1.5 rounded-2xl shadow-lg border border-slate-200 max-w-[calc(100%-2rem)]">
               <span className="text-[11px] font-black text-slate-600 px-1.5 flex items-center gap-1">
                 <Layers className="h-3.5 w-3.5 text-purple-600" /> Map:
               </span>
 
               <button
                 type="button"
-                onClick={() => setMapType('osm')}
+                onClick={() => setMapType('hot')}
                 className={`text-[11px] font-bold px-2.5 py-1 rounded-xl transition-all ${
-                  mapType === 'osm' ? 'bg-purple-700 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+                  mapType === 'hot' ? 'bg-purple-700 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
                 }`}
-                title="OpenStreetMap with high-detail village panchayat roads, small streets and hamlets"
+                title="Humanitarian OpenStreetMap: high-contrast narrow village roads, tracks, hamlets & paths"
               >
-                Rural Roads & Villages
+                Narrow Roads (HOT)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMapType('satellite')}
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-xl transition-all ${
+                  mapType === 'satellite' ? 'bg-purple-700 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+                title="Aerial satellite imagery: reveals real narrow village dirt tracks, alleys and houses"
+              >
+                Satellite (Aerial)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMapType('cyclosm')}
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-xl transition-all ${
+                  mapType === 'cyclosm' ? 'bg-purple-700 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+                title="CyclOSM: detailed narrow rural lanes and connectors"
+              >
+                Rural Lanes
               </button>
 
               <button
@@ -1213,38 +1249,42 @@ export default function RouteInitiatorModal({
 
               <button
                 type="button"
-                onClick={() => setMapType('satellite')}
+                onClick={() => setMapType('osm')}
                 className={`text-[11px] font-bold px-2.5 py-1 rounded-xl transition-all ${
-                  mapType === 'satellite' ? 'bg-purple-700 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Aerial satellite imagery to see real village roads and houses"
-              >
-                Satellite (Aerial)
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setMapType('terrain')}
-                className={`text-[11px] font-bold px-2.5 py-1 rounded-xl transition-all ${
-                  mapType === 'terrain' ? 'bg-purple-700 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+                  mapType === 'osm' ? 'bg-purple-700 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
-                Terrain
+                Standard
               </button>
 
-              {/* Toggle Village Pins on Map */}
+              {/* Toggle Village Numbers on Map */}
               <button
                 type="button"
                 onClick={() => setShowVillagePins(!showVillagePins)}
                 className={`text-[11px] font-bold px-2.5 py-1 rounded-xl flex items-center gap-1 transition-all border ${
                   showVillagePins
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-xs'
+                    ? 'bg-purple-50 text-purple-800 border-purple-300 shadow-xs'
                     : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
                 }`}
-                title="Show clickable village markers on the map"
+                title="Toggle numbered village markers on the map"
               >
                 <span>🏡</span>
                 <span>{showVillagePins ? `Villages (${nearbyVillages.length})` : 'Show Villages'}</span>
+              </button>
+
+              {/* Toggle Village Numbers Quick Index Directory */}
+              <button
+                type="button"
+                onClick={() => setShowVillageList(!showVillageList)}
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-xl flex items-center gap-1 transition-all border ${
+                  showVillageList
+                    ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+                title="Open index directory of all numbered villages"
+              >
+                <span>📋</span>
+                <span>Numbers Index</span>
               </button>
 
               {/* Fit Route / Recenter Button */}
@@ -1258,6 +1298,48 @@ export default function RouteInitiatorModal({
                 <span>Fit Route</span>
               </button>
             </div>
+
+            {/* Floating Village Numbers Index Directory Card */}
+            {showVillageList && (
+              <div className="absolute top-16 right-4 z-30 w-72 max-h-[380px] bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-fade-in">
+                <div className="p-2.5 bg-gradient-to-r from-purple-900 to-indigo-900 text-white flex items-center justify-between text-xs font-bold">
+                  <span className="flex items-center gap-1.5">
+                    <span>🏡</span>
+                    <span>Village Numbers Directory ({nearbyVillages.length})</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowVillageList(false)}
+                    className="text-slate-300 hover:text-white text-xs px-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="p-1.5 overflow-y-auto divide-y divide-slate-100 text-xs max-h-[320px]">
+                  {nearbyVillages.map((v, idx) => (
+                    <div key={v.id || idx} className="py-1.5 px-1.5 flex items-center justify-between gap-2 hover:bg-purple-50/60 rounded-xl transition-colors">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="shrink-0 w-5 h-5 rounded-full bg-purple-700 text-white font-black text-[10px] flex items-center justify-center">
+                          {idx + 1}
+                        </span>
+                        <div className="truncate">
+                          <div className="font-bold text-slate-800 text-[11px] truncate">{v.name}</div>
+                          <div className="text-[9px] text-slate-400 truncate">{v.secondary}</div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleAddVillageToRoute(v)}
+                        className="shrink-0 text-[10px] bg-purple-100 hover:bg-purple-200 text-purple-800 font-bold px-2 py-1 rounded-lg"
+                        title={`Add #${idx + 1} ${v.name} to route`}
+                      >
+                        + Add
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Mode Banner / Instruction Overlay */}
             {pickingMode !== 'none' ? (
@@ -1288,7 +1370,7 @@ export default function RouteInitiatorModal({
 
             {/* Interactive Leaflet Map with High-Zoom Village & Rural Road Capability */}
             <MapContainer
-              center={[13.6288, 79.4192]}
+              center={startPlace ? [startPlace.lat, startPlace.lng] : [13.3420, 79.0830]}
               zoom={13}
               maxZoom={20}
               scrollWheelZoom={true}
@@ -1308,32 +1390,36 @@ export default function RouteInitiatorModal({
               {/* Click handler */}
               <MapClickHandler onMapClick={handleMapClick} />
 
-              {/* Clickable Small Village Pins across the region */}
-              {showVillagePins && nearbyVillages.map((v) => (
+              {/* Clickable Small Village Pins across the region rendered as clean numbers */}
+              {showVillagePins && nearbyVillages.map((v, idx) => (
                 <Marker
-                  key={v.id}
+                  key={v.id || idx}
                   position={[v.lat, v.lng]}
-                  icon={villageMapIcon}
+                  icon={numberedVillageIcon(idx + 1)}
                 >
-                  <Tooltip direction="top" offset={[0, -12]} opacity={0.95}>
-                    <span className="font-extrabold text-[10px] text-purple-950 bg-white/95 px-1 py-0.5 rounded shadow">
-                      🏡 {v.name}
+                  <Tooltip direction="top" offset={[0, -12]} opacity={0.95} permanent={false}>
+                    <span className="font-extrabold text-[11px] text-purple-950 bg-white/95 px-1.5 py-0.5 rounded shadow">
+                      #{idx + 1} {v.name}
                     </span>
                   </Tooltip>
                   <Popup>
-                    <div className="p-1 space-y-1.5 text-xs max-w-[210px]">
-                      <div className="flex items-center gap-1 font-black text-purple-700 uppercase text-[10px]">
-                        <span>🏡 Regional Village / Stop</span>
+                    <div className="p-1 space-y-1.5 text-xs max-w-[215px]">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+                        <span className="font-black text-purple-700 uppercase text-[10px] flex items-center gap-1">
+                          <span className="w-4 h-4 rounded-full bg-purple-700 text-white flex items-center justify-center text-[9px] font-black">{idx + 1}</span>
+                          Village #{idx + 1}
+                        </span>
+                        <span className="text-[9px] bg-purple-50 text-purple-700 px-1 py-0.5 rounded font-bold">{v.type || 'Village'}</span>
                       </div>
                       <div className="font-bold text-slate-900 leading-tight">{v.name}</div>
-                      <div className="text-[10px] text-slate-500">{v.secondary}</div>
+                      {v.secondary && <div className="text-[10px] text-slate-500 leading-normal">{v.secondary}</div>}
                       <button
                         type="button"
                         onClick={() => handleAddVillageToRoute(v)}
-                        className="w-full mt-1.5 btn-primary bg-purple-700 hover:bg-purple-800 text-[10px] py-1.5 px-2.5 font-bold flex items-center justify-center gap-1 rounded-xl shadow-xs"
+                        className="w-full mt-1.5 btn-primary bg-purple-700 hover:bg-purple-800 text-white text-[10px] py-1.5 px-2.5 font-bold flex items-center justify-center gap-1 rounded-xl shadow-xs transition-all"
                       >
                         <Plus className="h-3 w-3" />
-                        <span>Add Village to Route</span>
+                        <span>Add #{idx + 1} to Route</span>
                       </button>
                     </div>
                   </Popup>
@@ -1394,7 +1480,7 @@ export default function RouteInitiatorModal({
                     dragend: handleStartDragEnd,
                   }}
                 >
-                  <Tooltip direction="top" offset={[0, -18]} permanent>
+                  <Tooltip direction="top" offset={[0, -18]} permanent={false}>
                     <span className="font-black text-[11px] text-emerald-800 bg-white/95 px-1.5 py-0.5 rounded-lg shadow-sm border border-emerald-200">
                       A: {startPlace.name} (Drag to change)
                     </span>
@@ -1428,7 +1514,7 @@ export default function RouteInitiatorModal({
                     dragend: (e) => handleViaDragEnd(e, i),
                   }}
                 >
-                  <Tooltip direction="top" offset={[0, -16]} permanent>
+                  <Tooltip direction="top" offset={[0, -16]} permanent={false}>
                     <span className="font-bold text-[11px] text-purple-900 bg-white/95 px-1.5 py-0.5 rounded-lg shadow-sm border border-purple-200">
                       Via #{i + 1}: {vp.place.name} (Draggable)
                     </span>
@@ -1461,7 +1547,7 @@ export default function RouteInitiatorModal({
                     dragend: handleEndDragEnd,
                   }}
                 >
-                  <Tooltip direction="top" offset={[0, -18]} permanent>
+                  <Tooltip direction="top" offset={[0, -18]} permanent={false}>
                     <span className="font-black text-[11px] text-red-800 bg-white/95 px-1.5 py-0.5 rounded-lg shadow-sm border border-red-200">
                       B: {endPlace.name} (Drag to change)
                     </span>
@@ -1495,7 +1581,7 @@ export default function RouteInitiatorModal({
                     dragend: (e) => handleStopDragEnd(e, idx + 1),
                   }}
                 >
-                  <Tooltip direction="top" offset={[0, -15]} permanent>
+                  <Tooltip direction="top" offset={[0, -15]} permanent={false}>
                     <span className="font-bold text-[11px] text-slate-800 bg-white/95 px-1 py-0.5 rounded shadow">
                       #{idx + 1} {stop.name}
                     </span>

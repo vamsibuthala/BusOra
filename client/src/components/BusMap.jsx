@@ -63,13 +63,17 @@ export default function BusMap({
         .filter((s) => s.lat && s.lng)
         .map((s) => [s.lat, s.lng]);
 
-  const tileUrl = mapType === 'satellite'
+  const tileUrl = mapType === 'hot'
+    ? 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png'
+    : mapType === 'satellite'
     ? 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
+    : mapType === 'cyclosm'
+    ? 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png'
     : mapType === 'osm'
     ? 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
     : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
 
-  const tileAttribution = mapType === 'osm'
+  const tileAttribution = (mapType === 'osm' || mapType === 'hot' || mapType === 'cyclosm')
     ? '&copy; OpenStreetMap contributors'
     : '&copy; Google Maps';
 
@@ -85,6 +89,7 @@ export default function BusMap({
       <MapContainer
         center={mapCenter}
         zoom={zoom}
+        maxZoom={20}
         scrollWheelZoom={false}
         style={{ height, width: '100%' }}
         className="z-10"
@@ -92,6 +97,8 @@ export default function BusMap({
         <TileLayer
           attribution={tileAttribution}
           url={tileUrl}
+          maxZoom={20}
+          maxNativeZoom={19}
         />
 
         <MapUpdater center={mapCenter} zoom={zoom} bounds={allPoints.length > 1 ? allPoints : null} />

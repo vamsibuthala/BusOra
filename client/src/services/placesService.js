@@ -6,6 +6,34 @@
 
 // Verified Indian College & Transit Regional Gazetteer for instant 0ms suggestions
 export const VERIFIED_PLACES = [
+  // Primary Featured College
+  {
+    id: 'vp-vemu',
+    name: 'Vemu Institute of Technology',
+    secondary: 'P.Kothakota, Pakala-Chittoor Highway, Near Pakala, Chittoor Dist, Andhra Pradesh',
+    lat: 13.3420,
+    lng: 79.0830,
+    type: 'college',
+    keywords: ['vemu', 'vemu institute of technology', 'vemu college', 'vemu tech', 'vemut', 'kothakota', 'p.kothakota', 'pakala', 'chittoor', 'college', 'campus']
+  },
+  {
+    id: 'vp-pkothakota',
+    name: 'P.Kothakota Village (Vemu Junction)',
+    secondary: 'Pakala Mandal, Chittoor District, Andhra Pradesh',
+    lat: 13.3450,
+    lng: 79.0810,
+    type: 'village',
+    keywords: ['p.kothakota', 'kothakota', 'vemu junction', 'pakala', 'chittoor']
+  },
+  {
+    id: 'vp-putalapattu',
+    name: 'Putalapattu Junction',
+    secondary: 'Putalapattu Mandal, Chittoor District, Andhra Pradesh',
+    lat: 13.3850,
+    lng: 79.0920,
+    type: 'village',
+    keywords: ['putalapattu', 'putalapattu junction', 'chittoor highway']
+  },
   // Universities & Engineering Colleges
   {
     id: 'vp-sv-univ',
@@ -793,6 +821,8 @@ function expandQuery(q) {
   const lower = cleaned.toLowerCase();
 
   const replacements = [
+    { regex: /\bvemu\b/gi, replacement: 'Vemu Institute of Technology' },
+    { regex: /\bvemut\b/gi, replacement: 'Vemu Institute of Technology' },
     { regex: /\bsv\b/gi, replacement: 'Sri Venkateswara' },
     { regex: /\bsvu\b/gi, replacement: 'Sri Venkateswara University' },
     { regex: /\bsvce\b/gi, replacement: 'SV College of Engineering' },
@@ -1058,7 +1088,7 @@ export async function reverseGeocodeCoord(lat, lng) {
   };
 }
 
-// Calculate road driving route with alternatives using OSRM
+// Calculate road driving route with alternatives using OSM routing engine (supports narrow village roads)
 export async function computeDrivingRoute(waypoints) {
   if (!waypoints || waypoints.length < 2) return [];
 
@@ -1079,27 +1109,75 @@ export async function computeDrivingRoute(waypoints) {
   if (cleaned.length < 2) return [];
 
   const coordsStr = cleaned.map((p) => `${p.lng},${p.lat}`).join(';');
-  // Note: alternatives=true is only supported by OSRM for exactly 2 points
   const hasAlternatives = cleaned.length === 2;
-  const url = `https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson${hasAlternatives ? '&alternatives=true' : ''}`;
 
-  try {
-    const res = await fetch(url);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
-        return data.routes.map((r, idx) => ({
-          id: `route-${idx}`,
-          label: idx === 0 ? 'Primary Route (Fastest)' : `Alternative Route ${idx + 1}`,
-          via: r.legs?.[0]?.summary ? `via ${r.legs[0].summary}` : idx === 0 ? 'Fastest Highway Path' : 'Alternative Road',
-          distanceKm: (r.distance / 1000).toFixed(1),
-          durationMin: Math.round(r.duration / 60),
-          coordinates: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
-        }));
+  // Primary: routing.openstreetmap.de (routed-car with continue_straight=false for sharp village turns & narrow roads)
+  const primaryUrl = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coordsStr}?overview=full&geometries=geojson&continue_straight=false${hasAlternatives ? '&alternatives=true' : ''}`;
+  const fallbackUrl = `https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson&continue_straight=false${hasAlternatives ? '&alternatives=true' : ''}`;
+
+  for (const url of [primaryUrl, fallbackUrl]) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+          return data.routes.map((r, idx) => ({
+            id: `route-${idx}`,
+            label: idx === 0 ? 'Primary Route (Narrow Roads & Highways)' : `Alternative Route ${idx + 1}`,
+            via: r.legs?.[0]?.summary ? `via ${r.legs[0].summary}` : idx === 0 ? 'Fastest Road Path' : 'Alternative Road',
+            distanceKm: (r.distance / 1000).toFixed(1),
+            durationMin: Math.round(r.duration / 60),
+            coordinates: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+          }));
+        }
       }
+    } catch (err) {
+      console.warn(`Routing request failed for ${url}:`, err.message);
     }
-  } catch (err) {
-    console.warn('OSRM route calculation failed:', err);
+  }
+
+  // Segment-by-segment routing fallback if multi-point chain had an issue on a narrow connector
+  if (cleaned.length > 2) {
+    try {
+      const combinedCoords = [];
+      let totalDist = 0;
+      let totalDur = 0;
+
+      for (let i = 0; i < cleaned.length - 1; i++) {
+        const segStr = `${cleaned[i].lng},${cleaned[i].lat};${cleaned[i+1].lng},${cleaned[i+1].lat}`;
+        const segUrl = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${segStr}?overview=full&geometries=geojson&continue_straight=false`;
+        const res = await fetch(segUrl);
+        if (res.ok) {
+          const d = await res.json();
+          if (d.code === 'Ok' && d.routes?.[0]) {
+            totalDist += d.routes[0].distance;
+            totalDur += d.routes[0].duration;
+            const pts = d.routes[0].geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+            if (combinedCoords.length > 0) pts.shift();
+            combinedCoords.push(...pts);
+            continue;
+          }
+        }
+        combinedCoords.push([cleaned[i].lat, cleaned[i].lng], [cleaned[i+1].lat, cleaned[i+1].lng]);
+      }
+
+      if (combinedCoords.length > 1) {
+        return [{
+          id: 'route-segmented',
+          label: 'Direct Village Transit Route',
+          via: 'Connected Village Roads',
+          distanceKm: (totalDist / 1000).toFixed(1),
+          durationMin: Math.round(totalDur / 60) || 15,
+          coordinates: combinedCoords,
+        }];
+      }
+    } catch (e) {
+      console.warn('Segmented routing fallback failed:', e);
+    }
   }
 
   // Safe fallback: connect waypoints smoothly
