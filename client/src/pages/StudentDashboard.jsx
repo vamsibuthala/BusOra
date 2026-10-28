@@ -12,21 +12,12 @@ import {
   RotateCw,
   ShieldAlert,
   Zap,
-  Milestone,
-  Check,
-  Compass,
-  ArrowRight
+  Users,
+  Building2,
+  Check
 } from 'lucide-react';
 import BusMap from '../components/BusMap';
 import { apiRequest, getSocket } from '../services/api';
-
-const kmDistance = (a, b) => {
-  if (!a || !b || !a.lat || !b.lat) return null;
-  const r = (x) => (x * Math.PI) / 180;
-  const d = r(b.lat - a.lat);
-  const e = r(b.lng - a.lng);
-  return 12742 * Math.asin(Math.sqrt(Math.sin(d / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(e / 2) ** 2));
-};
 
 const formatTimeAgo = (iso) => {
   if (!iso) return 'never';
@@ -43,6 +34,13 @@ export default function StudentDashboard({ user }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState(new Date());
+
+  const collegeDestination = {
+    id: 'vemu-campus',
+    name: 'Vemu Institute of Technology Campus',
+    lat: 13.3420,
+    lng: 79.0830,
+  };
 
   const fetchStudentData = async () => {
     try {
@@ -79,7 +77,6 @@ export default function StudentDashboard({ user }) {
       Notification.requestPermission();
     }
 
-    // Connect socket for real-time live location & notifications
     const socket = getSocket();
 
     const handleLocation = (payload) => {
@@ -107,8 +104,7 @@ export default function StudentDashboard({ user }) {
     socket.on('bus-status', handleStatus);
     socket.on('notification', handleNotification);
 
-    // Periodic heartbeat sync
-    const interval = setInterval(fetchStudentData, 8000);
+    const interval = setInterval(fetchStudentData, 6000);
 
     return () => {
       socket.off('location', handleLocation);
@@ -132,7 +128,7 @@ export default function StudentDashboard({ user }) {
       <div className="flex h-96 items-center justify-center">
         <div className="flex items-center gap-3 text-slate-500 font-semibold text-sm">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
-          <span>Connecting to BusOra Satellite Feed...</span>
+          <span>Connecting to Bus Group Satellite Radar...</span>
         </div>
       </div>
     );
@@ -142,102 +138,28 @@ export default function StudentDashboard({ user }) {
     return (
       <div className="mx-auto max-w-2xl text-center py-16 card">
         <Bus className="h-12 w-12 text-slate-300 mx-auto mb-3" />
-        <h2 className="text-xl font-bold text-navy-900">No College Bus Assigned Yet</h2>
+        <h2 className="text-xl font-bold text-navy-900">No Bus Group Assigned Yet</h2>
         <p className="text-xs text-slate-500 mt-2 max-w-md mx-auto">
-          Your student profile is active, but an administrator has not yet assigned you to a specific bus route or boarding stop.
+          Your student account is active, but an administrator has not yet assigned you to a college bus group. Please contact college administration.
         </p>
       </div>
     );
   }
 
   const bus = data.bus;
-  const userStop = data.stop;
-  const stops = bus.route?.stops || [];
+  const isRunning = busStatus === 'running';
+  const isDelayed = busStatus === 'delayed';
 
-  // Live GPS speed (in km/h)
+  // Real-time GPS Speed
   const currentSpeedKmh = busLocation?.speed 
     ? Math.round(busLocation.speed * 3.6) 
-    : (busStatus === 'running' ? 38 : 0);
+    : (isRunning ? 38 : 0);
 
-  // Effective calculation speed (assumes typical campus transit speed ~32 km/h if bus is currently paused at stop/signal)
-  const calculationSpeed = currentSpeedKmh > 5 ? currentSpeedKmh : 32;
-
-  // Find closest stop to bus
-  let closestStopIdx = 0;
-  let minDistance = Infinity;
-
-  stops.forEach((stop, idx) => {
-    if (busLocation?.lat && stop.lat) {
-      const d = kmDistance(busLocation, stop);
-      if (d !== null && d < minDistance) {
-        minDistance = d;
-        closestStopIdx = idx;
-      }
-    }
-  });
-
-  // Calculate "Where Is My Train" Station Arrival Timings along the route
-  const stopTimings = stops.map((stop, idx) => {
-    const isUserBoardingStop = userStop && (userStop.id === stop.id || userStop.name === stop.name);
-    const distToBus = busLocation?.lat && stop.lat ? kmDistance(busLocation, stop) : null;
-
-    let stopState = 'upcoming'; // 'departed' | 'approaching' | 'upcoming'
-    if (idx < closestStopIdx) {
-      stopState = 'departed';
-    } else if (idx === closestStopIdx) {
-      stopState = minDistance < 0.25 ? 'at_stop' : 'approaching';
-    } else {
-      stopState = 'upcoming';
-    }
-
-    // Cumulative distance calculation from current bus position
-    let cumulativeDist = 0;
-    if (idx === closestStopIdx) {
-      cumulativeDist = minDistance === Infinity ? 0 : minDistance;
-    } else if (idx > closestStopIdx) {
-      cumulativeDist = minDistance === Infinity ? 0 : minDistance;
-      for (let j = closestStopIdx; j < idx; j++) {
-        if (stops[j]?.lat && stops[j + 1]?.lat) {
-          cumulativeDist += (kmDistance(stops[j], stops[j + 1]) || 2.5);
-        } else {
-          cumulativeDist += 2.5;
-        }
-      }
-    }
-
-    // Formatted Arrival Clock Time & Minutes Remaining
-    let etaTimeStr = '--:--';
-    let minsUntil = null;
-
-    if (stopState === 'departed') {
-      const pastMins = Math.max(1, (closestStopIdx - idx) * 5);
-      const pastDate = new Date(Date.now() - pastMins * 60000);
-      etaTimeStr = pastDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else {
-      minsUntil = Math.max(1, Math.round((cumulativeDist / calculationSpeed) * 60));
-      const arrivalDate = new Date(Date.now() + minsUntil * 60000);
-      etaTimeStr = arrivalDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-
-    return {
-      ...stop,
-      order: idx + 1,
-      isUserBoardingStop,
-      distToBus,
-      stopState,
-      etaTimeStr,
-      minsUntil,
-      cumulativeDist,
-    };
-  });
-
-  // User's specific boarding stop stats
-  const userStopData = stopTimings.find((s) => s.isUserBoardingStop) || stopTimings[0];
   const isStale = busLocation?.at && Date.now() - new Date(busLocation.at).getTime() > 60000;
 
   return (
     <div className="space-y-6">
-      {/* Top Banner with Bus & Driver Info */}
+      {/* Top Banner with Bus Group & Driver Info */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-3xl bg-gradient-to-r from-navy-900 via-navy-800 to-sky-900 p-6 text-white shadow-xl">
         <div className="flex items-center gap-4">
           <img 
@@ -248,88 +170,124 @@ export default function StudentDashboard({ user }) {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="font-display text-2xl sm:text-3xl font-black">
-                Bus {bus.number}
+                {bus.number}
               </h1>
-              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider ${
-                busStatus === 'running' && !isStale
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-0.5 text-xs font-bold uppercase tracking-wider ${
+                isRunning && !isStale
                   ? 'bg-emerald-500 text-white'
-                  : busStatus === 'delayed'
+                  : isDelayed
                   ? 'bg-amber-500 text-white'
                   : 'bg-slate-700 text-slate-300'
               }`}>
-                <Radio className="h-3 w-3" />
-                {isStale ? 'Signal Paused' : busStatus === 'running' ? 'Live on Route' : 'Idle / Depot'}
+                {isRunning && !isStale ? (
+                  <>
+                    <span className="flex h-2 w-2 relative">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                    </span>
+                    <span>Live On Route</span>
+                  </>
+                ) : isDelayed ? (
+                  <>
+                    <Clock className="h-3 w-3" />
+                    <span>Delay Reported</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="h-2 w-2 rounded-full bg-slate-400" />
+                    <span>Idle at Depot</span>
+                  </>
+                )}
               </span>
             </div>
-            <p className="text-xs text-sky-200 mt-0.5">
-              Route: <span className="font-semibold text-white">{bus.route?.name}</span>
+            <p className="text-xs text-sky-200 mt-1">
+              Group Designation: <span className="font-semibold text-white">{bus.name}</span>
             </p>
           </div>
         </div>
 
-        {/* Driver contact badge */}
+        {/* Driver on duty contact card */}
         <div className="flex items-center gap-3 rounded-2xl bg-white/10 px-4 py-2.5 backdrop-blur-sm border border-white/10">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-500 text-white font-bold text-sm">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500 text-white font-bold text-base">
             🚍
           </div>
           <div className="text-xs">
             <p className="text-slate-300">Driver on Duty</p>
-            <p className="font-bold text-white">{bus.driver?.name || 'Rajesh Kumar (Driver)'}</p>
+            <p className="font-bold text-white">{bus.driver?.name || 'Assigned Driver'}</p>
           </div>
           {bus.driver?.phone && (
             <a
               href={`tel:${bus.driver.phone}`}
-              className="ml-2 rounded-lg bg-emerald-500 p-2 text-white hover:bg-emerald-600 transition-colors"
+              className="ml-2 rounded-xl bg-emerald-500 p-2 text-white hover:bg-emerald-600 transition-colors shadow-sm"
               title="Call Driver"
             >
-              <Phone className="h-3.5 w-3.5" />
+              <Phone className="h-4 w-4" />
             </a>
           )}
         </div>
       </div>
 
-      {/* Telemetry Metric Cards */}
+      {/* Driver Start Status Banner */}
+      {!isRunning && (
+        <div className="rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 p-4 text-xs text-amber-900 flex items-start gap-3 shadow-xs">
+          <Clock className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-black text-sm">Waiting for Driver to Start Bus</p>
+            <p className="text-amber-800 mt-0.5 leading-relaxed">
+              The driver has not clicked "Start Bus" in their cockpit yet. Once the driver starts the bus, real-time GPS coordinates will begin streaming automatically on your satellite map below.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {isRunning && (
+        <div className="rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 p-4 text-xs text-emerald-900 flex items-start gap-3 shadow-xs">
+          <Radio className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5 animate-pulse" />
+          <div>
+            <p className="font-black text-sm">Bus Active & Live GPS Broadcasting</p>
+            <p className="text-emerald-800 mt-0.5 leading-relaxed">
+              Driver has started the bus! Satellite tracking is active and streaming coordinates every 3-4 seconds.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Metric Cards Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {/* Metric 1: Boarding Stop */}
+        {/* Metric 1: Bus Group */}
         <div className="card p-4">
           <div className="flex items-center justify-between text-xs text-slate-500 font-semibold mb-1">
-            <span>Your Boarding Stop</span>
-            <MapPin className="h-4 w-4 text-emerald-500" />
+            <span>Your Bus Group</span>
+            <Bus className="h-4 w-4 text-sky-600" />
           </div>
           <p className="text-base sm:text-lg font-black text-navy-900 truncate">
-            {userStop?.name || 'Not assigned'}
+            {bus.number}
           </p>
-          <p className="text-[11px] text-slate-400 mt-0.5">Scheduled pickup location</p>
+          <p className="text-[11px] text-slate-400 mt-0.5 truncate">{bus.name}</p>
         </div>
 
         {/* Metric 2: Live Speed */}
-        <div className="card p-4 bg-gradient-to-br from-white to-purple-50/50 border-purple-200/80">
-          <div className="flex items-center justify-between text-xs text-purple-700 font-bold mb-1">
-            <span>Live GPS Speed</span>
-            <Zap className="h-4 w-4 text-purple-600" />
-          </div>
-          <p className="text-2xl font-black text-purple-700">
-            {currentSpeedKmh} <span className="text-sm font-semibold text-slate-500">km/h</span>
-          </p>
-          <p className="text-[11px] text-slate-400 mt-0.5">Real-time driver telemetry</p>
-        </div>
-
-        {/* Metric 3: Estimated Time of Arrival (ETA) to Your Stop */}
         <div className="card p-4 bg-gradient-to-br from-white to-sky-50/50 border-sky-200/80">
           <div className="flex items-center justify-between text-xs text-sky-700 font-bold mb-1">
-            <span>Arrival at Your Stop</span>
-            <Clock className="h-4 w-4 text-sky-600" />
+            <span>Driver GPS Speed</span>
+            <Zap className="h-4 w-4 text-sky-600" />
           </div>
           <p className="text-2xl font-black text-sky-600">
-            {userStopData?.stopState === 'departed'
-              ? 'Departed'
-              : userStopData?.minsUntil != null
-              ? `~${userStopData.minsUntil} mins`
-              : 'Estimating...'}
+            {currentSpeedKmh} <span className="text-sm font-semibold text-slate-500">km/h</span>
           </p>
-          <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-            {userStopData?.etaTimeStr ? `Expected at ${userStopData.etaTimeStr}` : 'Tracking live'}
+          <p className="text-[11px] text-slate-400 mt-0.5">Real-time driver speed</p>
+        </div>
+
+        {/* Metric 3: College Destination */}
+        <div className="card p-4 bg-gradient-to-br from-white to-purple-50/50 border-purple-200/80">
+          <div className="flex items-center justify-between text-xs text-purple-700 font-bold mb-1">
+            <span>Destination Campus</span>
+            <Building2 className="h-4 w-4 text-purple-600" />
+          </div>
+          <p className="text-sm font-black text-navy-900 truncate">
+            Vemu Institute of Technology
           </p>
+          <p className="text-[11px] text-slate-400 mt-0.5">P.Kothakota, Chittoor</p>
         </div>
 
         {/* Metric 4: Satellite Freshness */}
@@ -338,33 +296,23 @@ export default function StudentDashboard({ user }) {
             <span>Satellite Radar</span>
             <RotateCw className="h-4 w-4 text-slate-400" />
           </div>
-          <p className={`text-base font-black ${isStale ? 'text-amber-600' : 'text-emerald-600'}`}>
-            {isStale ? 'Signal Paused' : 'Live (< 3s)'}
+          <p className={`text-base font-black ${isStale ? 'text-amber-600' : isRunning ? 'text-emerald-600' : 'text-slate-600'}`}>
+            {isStale ? 'Signal Paused' : isRunning ? 'Live Stream' : 'Awaiting Start'}
           </p>
           <p className="text-[11px] text-slate-400 mt-0.5">Updated {formatTimeAgo(busLocation?.at)}</p>
         </div>
       </div>
 
-      {/* GPS Stale Warning Banner if applicable */}
-      {isStale && (
-        <div className="flex items-center gap-3 rounded-2xl bg-amber-50 p-4 text-xs font-medium text-amber-800 border border-amber-200">
-          <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
-          <span>
-            <b>Signal Notice:</b> The driver's device has paused sending location updates. The bus's last recorded position is displayed on the map.
-          </span>
-        </div>
-      )}
-
-      {/* Main Grid: Google Maps (Left) + Where Is My Train Timeline (Right) */}
+      {/* Main Grid: Interactive Satellite Map (Left) + Group Info & Notifications (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Interactive Google Map (7 cols) */}
-        <div className="lg:col-span-7 space-y-3">
+        {/* Left Column: Interactive Satellite Map (8 cols) */}
+        <div className="lg:col-span-8 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-base font-bold text-navy-900 flex items-center gap-2">
               <Radio className="h-4 w-4 text-sky-500" />
-              Live Interactive Google Maps Radar
+              Live Interactive GPS Map
             </h3>
-            <span className="text-xs font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
+            <span className="text-xs font-bold text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
               ⚡ {currentSpeedKmh} km/h
             </span>
           </div>
@@ -385,190 +333,91 @@ export default function StudentDashboard({ user }) {
                   ]
                 : []
             }
-            stops={stops}
-            userStop={userStop}
-            routePath={bus?.route?.path || null}
-            mapType="google"
+            stops={[collegeDestination]}
             height="520px"
           />
+        </div>
 
-          {/* Alert Notification Box beneath map */}
-          <div className="card p-4 space-y-2">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <div className="flex items-center gap-1.5 font-bold text-xs text-navy-900">
-                <Bell className="h-3.5 w-3.5 text-sky-500" />
-                <span>Transit Alerts & Notifications</span>
+        {/* Right Column: Bus Group Details & Alerts (4 cols) */}
+        <div className="lg:col-span-4 space-y-4">
+          {/* Group Details Card */}
+          <div className="card p-5 space-y-3 border border-slate-200">
+            <h3 className="font-bold text-sm text-navy-900 flex items-center gap-2 pb-2 border-b border-slate-100">
+              <Users className="h-4 w-4 text-sky-600" />
+              <span>Bus Group Information</span>
+            </h3>
+
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-medium">Bus Number:</span>
+                <span className="font-black text-slate-900">{bus.number}</span>
               </div>
-              <button
-                onClick={handleMarkNotificationsRead}
-                className="text-[11px] text-sky-600 hover:underline font-semibold"
-              >
-                Mark read
-              </button>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-medium">Group Name:</span>
+                <span className="font-bold text-slate-800 truncate max-w-[170px]">{bus.name}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-medium">Group Students:</span>
+                <span className="font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-md border border-sky-200">
+                  {bus.studentCount || 1} Enrolled
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-medium">Assigned Driver:</span>
+                <span className="font-bold text-slate-900">{bus.driver?.name || 'Driver on Duty'}</span>
+              </div>
+              {bus.driver?.phone && (
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-slate-500 font-medium">Driver Phone:</span>
+                  <a href={`tel:${bus.driver.phone}`} className="font-bold text-emerald-600 hover:underline">
+                    {bus.driver.phone}
+                  </a>
+                </div>
+              )}
             </div>
 
-            <div className="max-h-32 overflow-y-auto space-y-1.5 pr-1">
+            <div className="pt-2 border-t border-slate-100 text-[11px] text-slate-400">
+              🔒 Group Protected: Only students registered in {bus.number} have access to this live GPS feed.
+            </div>
+          </div>
+
+          {/* Transit Alerts & Notification Board */}
+          <div className="card p-5 space-y-3 border border-slate-200">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-1.5 font-bold text-xs text-navy-900">
+                <Bell className="h-4 w-4 text-sky-500" />
+                <span>Transit Notifications</span>
+              </div>
+              {notifications.length > 0 && (
+                <button
+                  onClick={handleMarkNotificationsRead}
+                  className="text-[11px] text-sky-600 hover:underline font-semibold"
+                >
+                  Mark read
+                </button>
+              )}
+            </div>
+
+            <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
               {notifications.length ? (
                 notifications.map((n, i) => (
                   <div
                     key={n.id || i}
-                    className={`rounded-xl p-2.5 text-xs transition-colors ${
-                      n.read ? 'bg-slate-50 text-slate-600' : 'bg-sky-50/80 text-sky-950 border border-sky-100 font-medium'
+                    className={`rounded-xl p-3 text-xs transition-colors ${
+                      n.read ? 'bg-slate-50 text-slate-600' : 'bg-sky-50 text-sky-950 border border-sky-100 font-medium'
                     }`}
                   >
                     <p>{n.message}</p>
-                    <span className="block text-[10px] text-slate-400 mt-0.5">
+                    <span className="block text-[10px] text-slate-400 mt-1">
                       {formatTimeAgo(n.created_at || n.createdAt)}
                     </span>
                   </div>
                 ))
               ) : (
-                <p className="text-center py-3 text-xs text-slate-400">
-                  No alerts. You will be notified when your bus starts and approaches your stop.
+                <p className="text-center py-6 text-xs text-slate-400">
+                  No alerts yet. You will receive notifications when your driver starts the bus or reports route updates.
                 </p>
               )}
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column: "Where Is My Train" Style Station Timeline Board (5 cols) */}
-        <div className="lg:col-span-5 space-y-3">
-          <div className="card p-5 border border-slate-200/90 shadow-md">
-            {/* Board Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div>
-                <h3 className="font-display font-black text-base text-navy-900 flex items-center gap-1.5">
-                  <Milestone className="h-4 w-4 text-purple-600" />
-                  <span>Station Timetable & ETAs</span>
-                </h3>
-                <p className="text-[11px] text-slate-500">Live "Where Is My Train" stop progression</p>
-              </div>
-
-              <div className="text-right">
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black text-emerald-800">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  LIVE GPS
-                </span>
-                <p className="text-[10px] text-slate-400 mt-0.5">Speed: {currentSpeedKmh} km/h</p>
-              </div>
-            </div>
-
-            {/* Vertical "Where Is My Train" Progress Track */}
-            <div className="mt-4 relative pl-2 pr-1 space-y-0">
-              {stopTimings.map((stop, idx) => {
-                const isLast = idx === stopTimings.length - 1;
-                const isPassed = stop.stopState === 'departed';
-                const isApproaching = stop.stopState === 'approaching' || stop.stopState === 'at_stop';
-
-                return (
-                  <div key={stop.id || idx} className="relative flex items-start gap-3 group">
-                    {/* Left: Clock Time & ETA badge */}
-                    <div className="w-16 shrink-0 text-right pt-0.5">
-                      <p className={`font-mono font-bold text-xs ${
-                        isApproaching 
-                          ? 'text-sky-600 font-black' 
-                          : isPassed 
-                          ? 'text-slate-400' 
-                          : 'text-navy-900'
-                      }`}>
-                        {stop.etaTimeStr}
-                      </p>
-
-                      <p className="text-[9px] font-bold">
-                        {isPassed ? (
-                          <span className="text-slate-400">Departed</span>
-                        ) : isApproaching ? (
-                          <span className="text-emerald-600 font-extrabold animate-pulse">
-                            {stop.minsUntil != null ? `in ${stop.minsUntil}m` : 'Arriving'}
-                          </span>
-                        ) : (
-                          <span className="text-purple-600">
-                            {stop.minsUntil != null ? `in ${stop.minsUntil}m` : ''}
-                          </span>
-                        )}
-                      </p>
-                    </div>
-
-                    {/* Center: Track Line with Animated Station Nodes */}
-                    <div className="relative flex flex-col items-center shrink-0 self-stretch">
-                      {/* Connecting Track Line */}
-                      {!isLast && (
-                        <div 
-                          className={`absolute top-4 bottom-0 w-1 transition-all ${
-                            isPassed ? 'bg-emerald-500' : 'bg-slate-200'
-                          }`}
-                        />
-                      )}
-
-                      {/* Station Node Indicator */}
-                      <div className={`relative z-10 flex h-6 w-6 items-center justify-center rounded-full border-2 transition-all ${
-                        isPassed
-                          ? 'bg-emerald-500 border-white text-white shadow-xs'
-                          : isApproaching
-                          ? 'bg-sky-500 border-white text-white shadow-md ring-4 ring-sky-200 animate-pulse'
-                          : 'bg-white border-slate-300 text-slate-500'
-                      }`}>
-                        {isPassed ? (
-                          <Check className="h-3 w-3 stroke-[3]" />
-                        ) : isApproaching ? (
-                          <Bus className="h-3 w-3 text-white" />
-                        ) : (
-                          <span className="text-[9px] font-black">{idx + 1}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Right: Station Name, Distance, and User Stop Highlight */}
-                    <div className={`flex-1 pb-5 pt-0.5 min-w-0 ${
-                      stop.isUserBoardingStop
-                        ? 'p-2.5 rounded-2xl bg-gradient-to-r from-emerald-50 via-emerald-100/60 to-white border-2 border-emerald-400 shadow-xs my-1'
-                        : isApproaching
-                        ? 'p-2 rounded-2xl bg-sky-50/70 border border-sky-200 my-0.5'
-                        : ''
-                    }`}>
-                      <div className="flex items-center justify-between gap-1">
-                        <p className={`text-xs font-bold truncate ${
-                          stop.isUserBoardingStop 
-                            ? 'text-emerald-950 font-black text-sm' 
-                            : isPassed 
-                            ? 'text-slate-500' 
-                            : 'text-navy-900'
-                        }`}>
-                          {stop.name}
-                        </p>
-
-                        {stop.isUserBoardingStop && (
-                          <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[9px] font-black text-white shrink-0 shadow-2xs">
-                            🎯 YOUR STOP
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Distance & Status Subtitle */}
-                      <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-slate-500">
-                        {stop.distToBus != null && (
-                          <span className="flex items-center gap-0.5 font-medium">
-                            <Navigation className="h-2.5 w-2.5 text-slate-400" />
-                            {stop.distToBus.toFixed(1)} km away
-                          </span>
-                        )}
-
-                        {isApproaching && (
-                          <span className="rounded-md bg-sky-100 text-sky-800 font-bold px-1.5 py-0.2">
-                            Approaching Next
-                          </span>
-                        )}
-
-                        {isPassed && (
-                          <span className="text-slate-400">
-                            Passed successfully
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
             </div>
           </div>
         </div>

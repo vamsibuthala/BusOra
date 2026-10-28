@@ -58,7 +58,7 @@ export default function Navbar({ user, onLogout, onOpenLogin, activeTab, setActi
               activeTab === 'routes' ? 'text-sky-600 bg-sky-50' : 'text-slate-600 hover:text-navy-800 hover:bg-slate-100'
             }`}
           >
-            Routes & Stops
+            Bus Groups
           </button>
 
           {user && (
@@ -102,16 +102,10 @@ export default function Navbar({ user, onLogout, onOpenLogin, activeTab, setActi
           ) : (
             <div className="flex items-center gap-2">
               <button
-                onClick={() => onOpenLogin('student')}
-                className="text-xs font-semibold text-slate-600 hover:text-sky-600 px-2 py-1.5 transition-colors"
-              >
-                Student
-              </button>
-              <button
                 onClick={() => onOpenLogin('driver')}
-                className="text-xs font-semibold text-slate-600 hover:text-emerald-600 px-2 py-1.5 transition-colors"
+                className="text-xs font-bold text-slate-700 hover:text-emerald-700 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
               >
-                Driver
+                Driver Console
               </button>
               <button
                 onClick={() => onOpenLogin('admin')}
@@ -157,7 +151,7 @@ export default function Navbar({ user, onLogout, onOpenLogin, activeTab, setActi
               onClick={() => { setActiveTab('routes'); setMobileMenuOpen(false); }}
               className={`text-left px-3 py-2 rounded-lg font-medium text-sm ${activeTab === 'routes' ? 'bg-sky-50 text-sky-600' : 'text-slate-700'}`}
             >
-              Routes & Stops
+              Bus Groups
             </button>
             {user && (
               <button
@@ -184,24 +178,18 @@ export default function Navbar({ user, onLogout, onOpenLogin, activeTab, setActi
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  onClick={() => { onOpenLogin('student'); setMobileMenuOpen(false); }}
-                  className="rounded-lg bg-sky-50 py-2 text-xs font-semibold text-sky-700 text-center"
-                >
-                  Student
-                </button>
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => { onOpenLogin('driver'); setMobileMenuOpen(false); }}
                   className="rounded-lg bg-emerald-50 py-2 text-xs font-semibold text-emerald-700 text-center"
                 >
-                  Driver
+                  Driver Console
                 </button>
                 <button
                   onClick={() => { onOpenLogin('admin'); setMobileMenuOpen(false); }}
                   className="rounded-lg bg-navy-800 py-2 text-xs font-semibold text-white text-center"
                 >
-                  Admin
+                  Admin Portal
                 </button>
               </div>
             )}

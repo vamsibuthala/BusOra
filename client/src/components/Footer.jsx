@@ -30,9 +30,9 @@ export default function Footer({ onOpenLogin }) {
             <h4 className="text-xs font-bold uppercase tracking-wider text-white">Role Portals</h4>
             <ul className="mt-4 space-y-2 text-xs">
               <li>
-                <button onClick={() => onOpenLogin('student')} className="hover:text-sky-400 transition-colors">
-                  🎓 Student Live Tracking
-                </button>
+                <a href="#bus-groups" className="hover:text-sky-400 transition-colors">
+                  🎓 Student Bus Groups
+                </a>
               </li>
               <li>
                 <button onClick={() => onOpenLogin('driver')} className="hover:text-sky-400 transition-colors">

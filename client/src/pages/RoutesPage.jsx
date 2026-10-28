@@ -1,39 +1,39 @@
 import React, { useState, useEffect } from 'react';
-import { Bus, MapPin, CheckCircle, Navigation, Clock, Route as RouteIcon } from 'lucide-react';
+import { Bus, MapPin, CheckCircle, Navigation, Clock, ShieldCheck, Users, ArrowRight } from 'lucide-react';
 import BusMap from '../components/BusMap';
 import { apiRequest } from '../services/api';
 
 export default function RoutesPage({ onOpenLogin }) {
-  const [routes, setRoutes] = useState([]);
-  const [selectedRouteIdx, setSelectedRouteIdx] = useState(0);
+  const [buses, setBuses] = useState([]);
+  const [selectedBusIdx, setSelectedBusIdx] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     apiRequest('/public/summary')
       .then((data) => {
-        if (data.routes) {
-          setRoutes(data.routes);
+        if (data.buses) {
+          setBuses(data.buses);
         }
       })
       .catch((err) => console.log(err))
       .finally(() => setLoading(false));
   }, []);
 
-  const activeRoute = routes[selectedRouteIdx] || routes[0];
+  const activeBus = buses[selectedBusIdx] || buses[0];
 
   return (
     <div className="py-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
       {/* Title */}
       <div className="text-center max-w-3xl mx-auto space-y-2">
         <div className="inline-flex items-center gap-1.5 rounded-full bg-sky-100 px-3 py-1 text-xs font-bold text-sky-800">
-          <MapPin className="h-3.5 w-3.5" />
-          <span>Campus Transport Network</span>
+          <Bus className="h-3.5 w-3.5" />
+          <span>Campus Transit Fleet Groups</span>
         </div>
         <h1 className="text-3xl sm:text-4xl font-black text-navy-900 tracking-tight">
-          College Bus Routes & Stop Directory
+          College Bus Groups Directory
         </h1>
         <p className="text-xs sm:text-sm text-slate-600">
-          Official schedules, sequenced boarding stops, and real-time route path visualizations.
+          Browse active campus bus groups, assigned drivers, and registered commuter rosters. Select your bus number to sign in.
         </p>
       </div>
 
@@ -41,135 +41,150 @@ export default function RoutesPage({ onOpenLogin }) {
         <div className="flex h-64 items-center justify-center">
           <div className="flex items-center gap-3 text-slate-500 font-semibold text-sm">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
-            <span>Loading Campus Routes...</span>
+            <span>Loading College Bus Groups...</span>
           </div>
         </div>
-      ) : routes.length === 0 ? (
+      ) : buses.length === 0 ? (
         <div className="card p-12 text-center max-w-xl mx-auto border-dashed border-2 border-slate-300">
-          <RouteIcon className="h-12 w-12 text-slate-300 mx-auto mb-3" />
-          <h2 className="text-lg font-bold text-navy-900">No Routes Published Yet</h2>
+          <Bus className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-navy-900">No Bus Groups Published Yet</h2>
           <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-            The transport administrator has not configured any routes yet. As soon as the administrator creates routes and assigns them to drivers, they will be listed here.
+            The transport administrator has not configured any bus groups yet.
           </p>
           <div className="mt-6">
             <button
               onClick={() => onOpenLogin('admin')}
               className="btn-primary text-xs py-2.5 px-5 shadow-sm"
             >
-              Sign In as Admin to Add Routes
+              Sign In as Admin to Add Bus Groups
             </button>
           </div>
         </div>
       ) : (
         <>
-          {/* Route Selector Tabs */}
+          {/* Bus Selector Tabs */}
           <div className="flex flex-wrap justify-center gap-2">
-            {routes.map((r, i) => (
+            {buses.map((b, i) => (
               <button
-                key={r.id || i}
-                onClick={() => setSelectedRouteIdx(i)}
+                key={b.id || i}
+                onClick={() => setSelectedBusIdx(i)}
                 className={`flex items-center gap-2 rounded-2xl px-5 py-3 text-xs sm:text-sm font-bold transition-all ${
-                  selectedRouteIdx === i
+                  selectedBusIdx === i
                     ? 'bg-navy-900 text-white shadow-md'
                     : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
                 }`}
               >
-                <Bus className={`h-4 w-4 ${selectedRouteIdx === i ? 'text-sky-400' : 'text-slate-400'}`} />
-                <span>{r.name}</span>
+                <Bus className={`h-4 w-4 ${selectedBusIdx === i ? 'text-sky-400' : 'text-slate-400'}`} />
+                <span>{b.number}</span>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                  b.status === 'running' ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {b.status === 'running' ? 'Live' : 'Idle'}
+                </span>
               </button>
             ))}
           </div>
 
-          {/* Active Route Details Grid */}
-          {activeRoute && (
+          {/* Active Bus Details Grid */}
+          {activeBus && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-              {/* Left: Stops sequence list (5 cols) */}
+              {/* Left: Group Info Card (5 cols) */}
               <div className="lg:col-span-5 space-y-4">
-                <div className="card p-6 space-y-4">
+                <div className="card p-6 space-y-5">
                   <div>
-                    <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[11px] font-bold text-sky-700 uppercase">
-                      Active Corridor
-                    </span>
-                    <h2 className="text-xl font-black text-navy-900 mt-2">{activeRoute.name}</h2>
-                    {activeRoute.description && (
-                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">{activeRoute.description}</p>
-                    )}
-                    <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-slate-600">
-                      {activeRoute.distanceKm && (
-                        <span className="font-bold text-purple-700">📍 {activeRoute.distanceKm} km</span>
-                      )}
-                      {activeRoute.durationMin && (
-                        <span className="font-bold text-purple-700">⏱ ~{activeRoute.durationMin} mins</span>
-                      )}
-                      {activeRoute.stops && activeRoute.stops.length >= 2 && (
-                        <a
-                          href={`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(activeRoute.stops[0].name)}&destination=${encodeURIComponent(activeRoute.stops[activeRoute.stops.length - 1].name)}&waypoints=${activeRoute.stops.slice(1, -1).map(s => encodeURIComponent(s.name)).join('|')}&travelmode=driving`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-bold text-sky-600 hover:text-sky-700 hover:underline"
-                        >
-                          ↗ Open in Google Maps
-                        </a>
-                      )}
+                    <div className="flex items-center justify-between">
+                      <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[11px] font-bold text-sky-700 uppercase">
+                        Bus Group Details
+                      </span>
+                      <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase ${
+                        activeBus.status === 'running'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {activeBus.status === 'running' ? '🟢 Live on Route' : '⏸️ Idle at Depot'}
+                      </span>
                     </div>
+
+                    <h2 className="text-2xl font-black text-navy-900 mt-2">{activeBus.number}</h2>
+                    <p className="text-sm font-semibold text-purple-800 mt-0.5">{activeBus.name}</p>
+                  </div>
+
+                  <div className="rounded-2xl bg-slate-50 p-4 border border-slate-100 space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 font-medium">Assigned Driver:</span>
+                      <span className="font-bold text-slate-800">{activeBus.driver?.name || 'Driver on Duty'}</span>
+                    </div>
+                    {activeBus.driver?.phone && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 font-medium">Driver Contact:</span>
+                        <span className="font-mono text-slate-700">{activeBus.driver.phone}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 font-medium">Group Students:</span>
+                      <span className="font-bold text-sky-700 bg-sky-50 px-2.5 py-0.5 rounded-full border border-sky-200">
+                        {activeBus.studentCount || 0} Registered
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 font-medium">Bus Capacity:</span>
+                      <span className="font-bold text-slate-800">{activeBus.capacity || 45} Seats</span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-amber-50 p-3 text-[11px] text-amber-800 border border-amber-200">
+                    🔒 <strong>Strict Access Notice:</strong> Other group students do not have access to view this bus. You must log in with credentials registered to {activeBus.number}.
                   </div>
 
                   <div className="pt-2 border-t border-slate-100">
-                    <h3 className="font-bold text-xs uppercase tracking-wider text-slate-500 mb-3">
-                      Stop Sequence ({activeRoute.stops?.length || 0} stops)
-                    </h3>
-
-                    <div className="space-y-3">
-                      {activeRoute.stops?.map((stop, idx) => (
-                        <div
-                          key={stop.id || idx}
-                          className="flex items-center justify-between rounded-xl bg-slate-50 p-3 text-xs border border-slate-100"
-                        >
-                          <div className="flex items-center gap-3">
-                            <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-navy-800 text-xs font-black text-white">
-                              {idx + 1}
-                            </span>
-                            <div>
-                              <p className="font-bold text-slate-900">{stop.name}</p>
-                              <p className="text-[10px] text-slate-400 font-mono">
-                                {stop.lat?.toFixed(4)}, {stop.lng?.toFixed(4)}
-                              </p>
-                            </div>
-                          </div>
-                          <span className="text-[11px] font-semibold text-sky-600">
-                            {idx === 0 ? '🏁 Origin' : idx === activeRoute.stops.length - 1 ? '🎯 Campus' : '📍 Stop'}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="pt-4 border-t border-slate-100">
                     <button
-                      onClick={() => onOpenLogin('student')}
-                      className="btn-primary w-full text-xs py-3"
+                      onClick={() => onOpenLogin('student', activeBus)}
+                      className="btn-sky w-full py-3 text-xs font-bold flex items-center justify-center gap-2"
                     >
-                      Sign In to Track Assigned Bus
+                      <span>Sign In to Track {activeBus.number}</span>
+                      <ArrowRight className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
               </div>
 
-              {/* Right: Route Map Preview (7 cols) */}
+              {/* Right: Map Preview (7 cols) */}
               <div className="lg:col-span-7 space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-sm text-navy-900 flex items-center gap-2">
                     <Navigation className="h-4 w-4 text-sky-500" />
-                    Route Path & Geolocation Points
+                    Live Satellite Bus Map ({activeBus.number})
                   </h3>
-                  <span className="text-xs text-purple-700 font-bold">Google Maps Road Network</span>
+                  <span className="text-xs text-purple-700 font-bold">
+                    {activeBus.status === 'running' ? '⚡ Moving' : 'Depot Position'}
+                  </span>
                 </div>
 
                 <BusMap
-                  stops={activeRoute.stops || []}
-                  routePath={activeRoute.path || null}
-                  mapType="google"
-                  height="500px"
+                  buses={
+                    activeBus.last_lat
+                      ? [
+                          {
+                            id: activeBus.id,
+                            number: activeBus.number,
+                            status: activeBus.status,
+                            lat: activeBus.last_lat,
+                            lng: activeBus.last_lng,
+                            speed: activeBus.last_speed,
+                            at: activeBus.last_location_at,
+                          },
+                        ]
+                      : []
+                  }
+                  stops={[
+                    {
+                      id: 'vemu-college',
+                      name: 'Vemu Institute of Technology Campus',
+                      lat: 13.3420,
+                      lng: 79.0830,
+                    },
+                  ]}
+                  height="480px"
                 />
               </div>
             </div>

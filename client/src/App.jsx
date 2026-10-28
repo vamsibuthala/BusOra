@@ -14,9 +14,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home'); // 'home' | 'routes' | 'dashboard'
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [loginRole, setLoginRole] = useState('student');
+  const [loginTargetBus, setLoginTargetBus] = useState(null);
 
-  const handleOpenLogin = (role = 'student') => {
+  const handleOpenLogin = (role = 'student', targetBus = null) => {
     setLoginRole(role);
+    setLoginTargetBus(targetBus);
     setIsLoginOpen(true);
   };
 
@@ -71,13 +73,13 @@ export default function App() {
           <div className="mx-auto max-w-md my-20 card text-center p-8">
             <h2 className="text-xl font-bold text-navy-900 mb-2">Authentication Required</h2>
             <p className="text-xs text-slate-500 mb-6">
-              Please sign in with your role account to access the dashboard.
+              Please select your Bus Group on the Home page to sign in and view your bus.
             </p>
             <button
-              onClick={() => handleOpenLogin('student')}
+              onClick={() => setActiveTab('home')}
               className="btn-primary w-full py-2.5 text-xs font-bold"
             >
-              Sign In to BusOra
+              Go to Home Page & Select Bus
             </button>
           </div>
         )}
@@ -90,7 +92,11 @@ export default function App() {
       <LoginModal
         isOpen={isLoginOpen}
         defaultRole={loginRole}
-        onClose={() => setIsLoginOpen(false)}
+        targetBus={loginTargetBus}
+        onClose={() => {
+          setIsLoginOpen(false);
+          setLoginTargetBus(null);
+        }}
         onSuccess={handleLoginSuccess}
       />
     </div>

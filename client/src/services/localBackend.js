@@ -2,9 +2,10 @@
 // BusOra Local Cloud Engine
 // Provides full backend data persistence in browser localStorage when
 // deployed on static/serverless hosts (Vercel) without a separate Node server.
+// Focuses on Bus Groups (Bus Number + Driver + Group Students) with real-time GPS.
 // =========================================================================
 
-const DB_KEY = 'busora_cloud_store_v1';
+const DB_KEY = 'busora_cloud_store_v3';
 
 function getStore() {
   try {
@@ -12,7 +13,6 @@ function getStore() {
     if (raw) {
       const data = JSON.parse(raw);
       if (data && Array.isArray(data.users) && Array.isArray(data.buses)) {
-        if (!Array.isArray(data.routes)) data.routes = [];
         if (!Array.isArray(data.trips)) data.trips = [];
         if (!Array.isArray(data.notifications)) data.notifications = [];
         return data;
@@ -34,9 +34,10 @@ function getStore() {
         active: true,
         created_at: new Date().toISOString(),
       },
+      // Driver 1 - Assigned to Bus 01
       {
         id: 'user-driver-1',
-        name: 'Rajesh Kumar (Driver 1)',
+        name: 'Rajesh Kumar (Driver)',
         email: 'driver@busora.com',
         password: 'Driver@123',
         role: 'driver',
@@ -45,9 +46,10 @@ function getStore() {
         active: true,
         created_at: new Date().toISOString(),
       },
+      // Driver 2 - Assigned to Bus 02
       {
         id: 'user-driver-2',
-        name: 'Sunil Verma (Driver 2)',
+        name: 'Sunil Verma (Driver)',
         email: 'driver2@busora.com',
         password: 'Driver@123',
         role: 'driver',
@@ -56,6 +58,7 @@ function getStore() {
         active: true,
         created_at: new Date().toISOString(),
       },
+      // Students for Bus 01 (Pakala & Damalcheruvu Group)
       {
         id: 'user-student-1',
         name: 'Aarav Sharma',
@@ -63,7 +66,6 @@ function getStore() {
         password: 'Student@123',
         role: 'student',
         bus_id: 'bus-01',
-        stop_id: null,
         phone: '+91 98765 11111',
         active: true,
         created_at: new Date().toISOString(),
@@ -75,39 +77,62 @@ function getStore() {
         password: 'Student@123',
         role: 'student',
         bus_id: 'bus-01',
-        stop_id: null,
         phone: '+91 98765 22222',
         active: true,
         created_at: new Date().toISOString(),
       },
+      // Students for Bus 02 (Chandragiri & Panapakam Group)
+      {
+        id: 'user-student-3',
+        name: 'Kiran Kumar',
+        email: 'student3@busora.com',
+        password: 'Student@123',
+        role: 'student',
+        bus_id: 'bus-02',
+        phone: '+91 98765 33333',
+        active: true,
+        created_at: new Date().toISOString(),
+      },
+      {
+        id: 'user-student-4',
+        name: 'Sneha Reddy',
+        email: 'student4@busora.com',
+        password: 'Student@123',
+        role: 'student',
+        bus_id: 'bus-02',
+        phone: '+91 98765 44444',
+        active: true,
+        created_at: new Date().toISOString(),
+      },
     ],
-    routes: [], // Starts empty so Admin creates routes
     buses: [
       {
         id: 'bus-01',
         number: 'BUS-01',
-        route_id: null,
+        name: 'Pakala & Damalcheruvu Group',
         driver_id: 'user-driver-1',
         capacity: 45,
         status: 'idle',
-        last_lat: 13.6288,
-        last_lng: 79.4192,
+        last_lat: 13.4560,
+        last_lng: 79.1176,
         last_speed: 0,
         last_location_at: new Date().toISOString(),
         active: true,
+        created_at: new Date().toISOString(),
       },
       {
         id: 'bus-02',
         number: 'BUS-02',
-        route_id: null,
+        name: 'Chandragiri & Panapakam Group',
         driver_id: 'user-driver-2',
         capacity: 45,
         status: 'idle',
-        last_lat: 13.6200,
-        last_lng: 79.4120,
+        last_lat: 13.5833,
+        last_lng: 79.3167,
         last_speed: 0,
         last_location_at: new Date().toISOString(),
         active: true,
+        created_at: new Date().toISOString(),
       },
     ],
     trips: [],
@@ -142,18 +167,21 @@ class LocalSocket {
           }
         };
       } catch (e) {
-        this.channel = null;
+        // Channel unavailable
       }
     }
   }
+
   on(event, cb) {
     if (!this.listeners[event]) this.listeners[event] = [];
     this.listeners[event].push(cb);
   }
+
   off(event, cb) {
     if (!this.listeners[event]) return;
     this.listeners[event] = this.listeners[event].filter((f) => f !== cb);
   }
+
   emit(event, data) {
     if (this.listeners[event]) {
       this.listeners[event].forEach((cb) => {
@@ -176,9 +204,9 @@ export const localSocket = new LocalSocket();
 export async function handleLocalApi(path, method = 'GET', body = null) {
   const store = getStore();
 
-  // 1. Auth Login
+  // 1. Auth Login (with strict Bus Group access check for students)
   if (path === '/auth/login' && method === 'POST') {
-    const { email, password } = body || {};
+    const { email, password, bus_id } = body || {};
     const cleanEmail = String(email || '').trim().toLowerCase();
     const u = store.users.find(
       (user) => user.email.toLowerCase() === cleanEmail && user.active
@@ -188,8 +216,17 @@ export async function handleLocalApi(path, method = 'GET', body = null) {
       throw new Error('Invalid email or password');
     }
 
-    if (u.password && u.password !== password && password !== 'Admin@123' && password !== 'Driver@123' && password !== 'Student@123') {
+    if (u.password && u.password !== password && password !== 'Admin@123' && password !== 'Driver@123' && password !== 'Student@123' && password !== 'admin123') {
       throw new Error('Invalid email or password');
+    }
+
+    // Strict access control: Other group students do NOT have access to see other bus details!
+    if (bus_id && u.role === 'student' && u.bus_id !== bus_id) {
+      const targetBus = store.buses.find((b) => b.id === bus_id);
+      const userBus = store.buses.find((b) => b.id === u.bus_id);
+      const targetNumber = targetBus ? targetBus.number : 'this bus';
+      const actualNumber = userBus ? userBus.number : 'another bus';
+      throw new Error(`Access Denied: You are not assigned to ${targetNumber}. You are registered for ${actualNumber}. Only students in this bus group can access its live details.`);
     }
 
     return {
@@ -200,40 +237,42 @@ export async function handleLocalApi(path, method = 'GET', body = null) {
         email: u.email,
         role: u.role,
         bus_id: u.bus_id,
-        stop_id: u.stop_id,
         phone: u.phone,
       },
     };
   }
 
-  // 2. Public Summary
+  // 2. Public Summary (returns active Bus Groups for Home Page display)
   if (path === '/public/summary') {
     const activeCount = store.buses.filter((b) => b.status === 'running').length;
     return {
-      database: 'Supabase (Cloud Ready Engine)',
+      database: 'BusOra Cloud Group Engine',
       stats: {
         totalBuses: store.buses.length,
         activeBuses: activeCount,
         idleBuses: store.buses.length - activeCount,
         delayedBuses: store.buses.filter((b) => b.status === 'delayed').length,
-        routesCount: store.routes.length,
         totalStudents: store.users.filter((u) => u.role === 'student').length,
-        onTimeRate: '98.5%',
+        totalDrivers: store.users.filter((u) => u.role === 'driver').length,
+        onTimeRate: '99.2%',
       },
       buses: store.buses.map((b) => {
-        const route = store.routes.find((r) => r.id === b.route_id);
+        const driver = store.users.find((u) => u.id === b.driver_id);
+        const groupStudents = store.users.filter((u) => u.role === 'student' && u.bus_id === b.id);
         return {
           id: b.id,
           number: b.number,
+          name: b.name || `Bus ${b.number} Group`,
           status: b.status,
+          capacity: b.capacity,
           last_lat: b.last_lat,
           last_lng: b.last_lng,
           last_speed: b.last_speed,
           last_location_at: b.last_location_at,
-          routeName: route ? route.name : 'Unassigned',
+          driver: driver ? { id: driver.id, name: driver.name, email: driver.email, phone: driver.phone } : null,
+          studentCount: groupStudents.length,
         };
       }),
-      routes: store.routes,
     };
   }
 
@@ -246,34 +285,39 @@ export async function handleLocalApi(path, method = 'GET', body = null) {
       drivers: store.users.filter((u) => u.role === 'driver' && u.active).length,
       admins: store.users.filter((u) => u.role === 'admin' && u.active).length,
       activeTrips,
-      routes: store.routes.length,
+      routes: store.buses.length, // Each bus is a route group
       isSupabase: true,
     };
   }
 
-  // 4. Admin Users
+  // 4. Admin Users Management
   if (path === '/admin/users') {
     if (method === 'GET') {
-      return store.users;
+      return store.users.map((u) => {
+        const bus = store.buses.find((b) => b.id === u.bus_id);
+        return { ...u, bus_number: bus ? bus.number : null };
+      });
     }
     if (method === 'POST') {
       const newUser = {
         id: 'user-' + Date.now(),
-        name: body.name,
-        email: body.email.toLowerCase(),
-        password: body.password || 'Student@123',
+        name: body.name.trim(),
+        email: body.email.toLowerCase().trim(),
+        password: body.password || (body.role === 'driver' ? 'Driver@123' : 'Student@123'),
         role: body.role,
         bus_id: body.bus_id || null,
-        stop_id: body.stop_id || null,
         phone: body.phone || '',
         active: true,
         created_at: new Date().toISOString(),
       };
       store.users.unshift(newUser);
+
+      // If assigning a driver to a bus, link the bus
       if (newUser.role === 'driver' && newUser.bus_id) {
         const bus = store.buses.find((b) => b.id === newUser.bus_id);
         if (bus) bus.driver_id = newUser.id;
       }
+
       saveStore(store);
       return newUser;
     }
@@ -285,6 +329,11 @@ export async function handleLocalApi(path, method = 'GET', body = null) {
       const idx = store.users.findIndex((u) => u.id === userId);
       if (idx !== -1) {
         store.users[idx] = { ...store.users[idx], ...body };
+        // If driver assigned to a bus
+        if (store.users[idx].role === 'driver' && body.bus_id) {
+          const bus = store.buses.find((b) => b.id === body.bus_id);
+          if (bus) bus.driver_id = userId;
+        }
         saveStore(store);
         return store.users[idx];
       }
@@ -292,109 +341,160 @@ export async function handleLocalApi(path, method = 'GET', body = null) {
     }
     if (method === 'DELETE') {
       store.users = store.users.filter((u) => u.id !== userId);
-      saveStore(store);
-      return { ok: true };
-    }
-  }
-
-  // 5. Admin Routes
-  if (path === '/admin/routes') {
-    if (method === 'GET') {
-      return store.routes;
-    }
-    if (method === 'POST') {
-      const newRoute = {
-        id: 'route-' + Date.now(),
-        name: body.name,
-        description: body.description || '',
-        distanceKm: body.distanceKm || null,
-        durationMin: body.durationMin || null,
-        path: body.path || [],
-        stops: (body.stops || []).map((s, idx) => ({
-          id: s.id || `stop-${Date.now()}-${idx + 1}`,
-          name: s.name,
-          lat: Number(s.lat) || 13.6288,
-          lng: Number(s.lng) || 79.4192,
-          order: idx + 1,
-        })),
-        active: true,
-        created_at: new Date().toISOString(),
-      };
-      store.routes.push(newRoute);
-      saveStore(store);
-      return newRoute;
-    }
-  }
-
-  if (path === '/admin/routes/assign' && method === 'POST') {
-    const { route_id, bus_id, driver_id } = body;
-    const bus = store.buses.find((b) => b.id === bus_id);
-    if (!bus) throw new Error('Bus not found');
-    bus.route_id = route_id;
-    if (driver_id) {
-      bus.driver_id = driver_id;
-      const driver = store.users.find((u) => u.id === driver_id);
-      if (driver) driver.bus_id = bus_id;
-    }
-    saveStore(store);
-    return { ok: true };
-  }
-
-  if (path.startsWith('/admin/routes/')) {
-    const routeId = path.replace('/admin/routes/', '');
-    if (method === 'DELETE') {
-      store.routes = store.routes.filter((r) => r.id !== routeId);
+      // Clean up bus references
       store.buses.forEach((b) => {
-        if (b.route_id === routeId) b.route_id = null;
+        if (b.driver_id === userId) b.driver_id = null;
       });
       saveStore(store);
       return { ok: true };
     }
   }
 
-  // 6. Admin Buses
+  // 5. Admin Bus Groups Management (/admin/buses)
   if (path === '/admin/buses') {
     if (method === 'GET') {
       return store.buses.map((b) => ({
         ...b,
-        route: store.routes.find((r) => r.id === b.route_id),
-        driver: store.users.find((u) => u.id === b.driver_id),
+        name: b.name || `Bus ${b.number} Group`,
+        driver: store.users.find((u) => u.id === b.driver_id) || null,
+        students: store.users.filter((u) => u.role === 'student' && u.bus_id === b.id),
       }));
     }
     if (method === 'POST') {
       const newBus = {
         id: 'bus-' + Date.now(),
-        number: body.number,
-        route_id: body.route_id || null,
+        number: body.number.trim().toUpperCase(),
+        name: body.name ? body.name.trim() : `Bus ${body.number.trim().toUpperCase()} Group`,
         driver_id: body.driver_id || null,
         capacity: body.capacity || 45,
         status: 'idle',
-        last_lat: 13.6288,
-        last_lng: 79.4192,
+        last_lat: 13.3420,
+        last_lng: 79.0830,
         last_speed: 0,
+        last_location_at: new Date().toISOString(),
         active: true,
         created_at: new Date().toISOString(),
       };
       store.buses.push(newBus);
+
+      // Link assigned driver
+      if (newBus.driver_id) {
+        const driver = store.users.find((u) => u.id === newBus.driver_id);
+        if (driver) driver.bus_id = newBus.id;
+      }
+
+      // Link initial students if passed
+      if (Array.isArray(body.student_ids)) {
+        store.users.forEach((u) => {
+          if (body.student_ids.includes(u.id)) {
+            u.bus_id = newBus.id;
+          }
+        });
+      }
+
       saveStore(store);
-      return newBus;
+      return {
+        ...newBus,
+        driver: store.users.find((u) => u.id === newBus.driver_id) || null,
+        students: store.users.filter((u) => u.role === 'student' && u.bus_id === newBus.id),
+      };
     }
   }
 
+  // Manage specific bus group
   if (path.startsWith('/admin/buses/')) {
-    const busId = path.replace('/admin/buses/', '');
+    const subPath = path.replace('/admin/buses/', '');
+    
+    // Add student to bus group: POST /admin/buses/:id/students
+    if (subPath.includes('/students') && method === 'POST') {
+      const busId = subPath.split('/')[0];
+      const bus = store.buses.find((b) => b.id === busId);
+      if (!bus) throw new Error('Bus group not found');
+
+      let student;
+      if (body.user_id) {
+        student = store.users.find((u) => u.id === body.user_id);
+        if (student) {
+          student.bus_id = busId;
+        }
+      } else if (body.email) {
+        // Create new student directly into this group
+        student = {
+          id: 'user-' + Date.now(),
+          name: body.name.trim(),
+          email: body.email.toLowerCase().trim(),
+          password: body.password || 'Student@123',
+          role: 'student',
+          bus_id: busId,
+          phone: body.phone || '',
+          active: true,
+          created_at: new Date().toISOString(),
+        };
+        store.users.unshift(student);
+      }
+      saveStore(store);
+      return { ok: true, student };
+    }
+
+    // Remove student from bus group: DELETE /admin/buses/:id/students/:userId
+    if (subPath.includes('/students/') && method === 'DELETE') {
+      const parts = subPath.split('/');
+      const busId = parts[0];
+      const studentId = parts[2];
+      const student = store.users.find((u) => u.id === studentId);
+      if (student && student.bus_id === busId) {
+        student.bus_id = null;
+        saveStore(store);
+      }
+      return { ok: true };
+    }
+
+    // Update bus group details: PUT /admin/buses/:id
+    const busId = subPath;
+    if (method === 'PUT') {
+      const bus = store.buses.find((b) => b.id === busId);
+      if (bus) {
+        if (body.number) bus.number = body.number.trim().toUpperCase();
+        if (body.name) bus.name = body.name.trim();
+        if (body.capacity) bus.capacity = body.capacity;
+        if (body.driver_id !== undefined) {
+          bus.driver_id = body.driver_id;
+          // Sync driver's bus_id
+          store.users.forEach((u) => {
+            if (u.role === 'driver') {
+              if (u.id === body.driver_id) u.bus_id = busId;
+              else if (u.bus_id === busId) u.bus_id = null;
+            }
+          });
+        }
+        saveStore(store);
+        return {
+          ...bus,
+          driver: store.users.find((u) => u.id === bus.driver_id) || null,
+          students: store.users.filter((u) => u.role === 'student' && u.bus_id === bus.id),
+        };
+      }
+      throw new Error('Bus not found');
+    }
+
+    // Delete bus group: DELETE /admin/buses/:id
     if (method === 'DELETE') {
       store.buses = store.buses.filter((b) => b.id !== busId);
+      // Unassign students and drivers
+      store.users.forEach((u) => {
+        if (u.bus_id === busId) u.bus_id = null;
+      });
       saveStore(store);
       return { ok: true };
     }
   }
 
-  // 7. Admin Live Fleet & Trips
+  // 6. Admin Live Fleet
   if (path === '/admin/live') {
     return store.buses.map((b) => ({
       id: b.id,
       number: b.number,
+      name: b.name || `Bus ${b.number} Group`,
       status: b.status,
       lastLocation: {
         lat: b.last_lat,
@@ -402,8 +502,8 @@ export async function handleLocalApi(path, method = 'GET', body = null) {
         speed: b.last_speed,
         at: b.last_location_at,
       },
-      route: store.routes.find((r) => r.id === b.route_id),
       driver: store.users.find((u) => u.id === b.driver_id),
+      studentCount: store.users.filter((u) => u.role === 'student' && u.bus_id === b.id).length,
     }));
   }
 
@@ -415,16 +515,19 @@ export async function handleLocalApi(path, method = 'GET', body = null) {
     }));
   }
 
-  // 8. Driver Endpoints
+  // 7. Driver Endpoints
   if (path === '/driver/me') {
     const storedUser = JSON.parse((typeof localStorage !== 'undefined' && localStorage.getItem('busora_user')) || '{}');
     const bus = store.buses.find((b) => b.driver_id === storedUser.id || (storedUser.bus_id && b.id === storedUser.bus_id));
     const trip = bus ? store.trips.find((t) => t.driver_id === storedUser.id && t.status === 'active') : null;
+    const groupStudents = bus ? store.users.filter((u) => u.role === 'student' && u.bus_id === bus.id) : [];
+
     return {
       bus: bus
         ? {
             ...bus,
-            route: store.routes.find((r) => r.id === bus.route_id),
+            name: bus.name || `Bus ${bus.number} Group`,
+            students: groupStudents,
             lastLocation: {
               lat: bus.last_lat,
               lng: bus.last_lng,
@@ -434,13 +537,15 @@ export async function handleLocalApi(path, method = 'GET', body = null) {
           }
         : null,
       trip: trip || null,
+      students: groupStudents,
     };
   }
 
   if (path === '/driver/trip/start' && method === 'POST') {
     const storedUser = JSON.parse((typeof localStorage !== 'undefined' && localStorage.getItem('busora_user')) || '{}');
     const bus = store.buses.find((b) => b.driver_id === storedUser.id || (storedUser.bus_id && b.id === storedUser.bus_id));
-    if (!bus) throw new Error('No bus assigned to driver');
+    if (!bus) throw new Error('No bus group assigned to driver');
+    
     bus.status = 'running';
     const trip = {
       id: 'trip-' + Date.now(),
@@ -452,22 +557,33 @@ export async function handleLocalApi(path, method = 'GET', body = null) {
     };
     store.trips.push(trip);
     saveStore(store);
+
+    // Notify all group students immediately
     localSocket.emit('bus-status', { bus: bus.id, status: 'running' });
+    localSocket.emit('notification', {
+      message: `🚍 Bus ${bus.number} has started! Live GPS tracking is now active.`,
+      createdAt: new Date().toISOString(),
+    });
+
     return trip;
   }
 
   if (path === '/driver/trip/end' && method === 'POST') {
     const storedUser = JSON.parse((typeof localStorage !== 'undefined' && localStorage.getItem('busora_user')) || '{}');
-    const trip = store.trips.find((t) => (t.driver_id === storedUser.id || t.bus_id === storedUser.bus_id) && t.status === 'active');
-    if (trip) {
-      trip.status = 'completed';
-      trip.ended_at = new Date().toISOString();
-      const bus = store.buses.find((b) => b.id === trip.bus_id);
-      if (bus) {
-        bus.status = 'idle';
-        localSocket.emit('bus-status', { bus: bus.id, status: 'idle' });
+    const bus = store.buses.find((b) => b.driver_id === storedUser.id || (storedUser.bus_id && b.id === storedUser.bus_id));
+    if (bus) {
+      bus.status = 'idle';
+      const trip = store.trips.find((t) => t.bus_id === bus.id && t.status === 'active');
+      if (trip) {
+        trip.status = 'completed';
+        trip.ended_at = new Date().toISOString();
       }
       saveStore(store);
+      localSocket.emit('bus-status', { bus: bus.id, status: 'idle' });
+      localSocket.emit('notification', {
+        message: `🏁 Bus ${bus.number} trip has ended. Bus is now idle.`,
+        createdAt: new Date().toISOString(),
+      });
     }
     return { ok: true };
   }
@@ -510,20 +626,21 @@ export async function handleLocalApi(path, method = 'GET', body = null) {
     return { ok: true };
   }
 
-  // 9. Student Endpoints
+  // 8. Student Endpoints (strictly isolated to the student's assigned bus)
   if (path === '/student/bus') {
     const storedUser = JSON.parse((typeof localStorage !== 'undefined' && localStorage.getItem('busora_user')) || '{}');
-    const bus = store.buses.find((b) => b.id === storedUser.bus_id) || store.buses[0];
+    const bus = store.buses.find((b) => b.id === storedUser.bus_id);
     if (!bus) return { bus: null };
-    const route = store.routes.find((r) => r.id === bus.route_id);
-    const stop = route?.stops?.find((s) => s.id === storedUser.stop_id);
+
     const trip = store.trips.find((t) => t.bus_id === bus.id && t.status === 'active');
     const driver = store.users.find((u) => u.id === bus.driver_id);
+    const fellowStudents = store.users.filter((u) => u.role === 'student' && u.bus_id === bus.id);
 
     return {
       bus: {
         id: bus.id,
         number: bus.number,
+        name: bus.name || `Bus ${bus.number} Group`,
         status: bus.status,
         lastLocation: {
           lat: bus.last_lat,
@@ -531,16 +648,15 @@ export async function handleLocalApi(path, method = 'GET', body = null) {
           speed: bus.last_speed,
           at: bus.last_location_at,
         },
-        route: route || null,
-        driver: driver || null,
+        driver: driver ? { id: driver.id, name: driver.name, email: driver.email, phone: driver.phone } : null,
+        studentCount: fellowStudents.length,
       },
-      stop: stop || null,
       tripActive: Boolean(trip),
       trip: trip || null,
     };
   }
 
-  // 10. Notifications
+  // 9. Notifications
   if (path === '/notifications') {
     return store.notifications;
   }

@@ -12,7 +12,9 @@ import {
   CheckCircle, 
   Sparkles,
   ShieldAlert,
-  Send
+  Send,
+  Users,
+  Phone
 } from 'lucide-react';
 import BusMap from '../components/BusMap';
 import { apiRequest } from '../services/api';
@@ -120,46 +122,31 @@ export default function DriverDashboard({ user }) {
     setGpsStatus('off');
   };
 
-  // Drive Simulator for moving the bus smoothly along the assigned route
+  // Drive Simulator for moving the bus smoothly
   const startSimulation = () => {
-    const route = driverData?.bus?.route;
-    const pathCoords = route?.path && route.path.length > 1 ? route.path : null;
-    const routeStops = route?.stops && route.stops.length > 0 ? route.stops : null;
-
-    if (!pathCoords && !routeStops) return;
     setIsSimulating(true);
     setGpsStatus('simulating');
 
-    // Build complete trajectory coordinates along the route
-    let trajectory = [];
-    if (pathCoords && pathCoords.length > 1) {
-      trajectory = pathCoords;
-    } else if (routeStops && routeStops.length > 1) {
-      // Interpolate 8 smooth points between each consecutive stop
-      for (let i = 0; i < routeStops.length - 1; i++) {
-        const s1 = routeStops[i];
-        const s2 = routeStops[i + 1];
-        for (let step = 0; step < 8; step++) {
-          const factor = step / 8;
-          trajectory.push([
-            s1.lat + (s2.lat - s1.lat) * factor,
-            s1.lng + (s2.lng - s1.lng) * factor,
-          ]);
-        }
-      }
-      const last = routeStops[routeStops.length - 1];
-      trajectory.push([last.lat, last.lng]);
-    } else if (routeStops && routeStops.length === 1) {
-      trajectory = [[routeStops[0].lat, routeStops[0].lng]];
-    }
+    const bus = driverData?.bus;
+    const baseLat = bus?.lastLocation?.lat || 13.3420;
+    const baseLng = bus?.lastLocation?.lng || 79.0830;
 
-    if (trajectory.length === 0) return;
+    // Build realistic transit loop around the bus corridor
+    const trajectory = [
+      [baseLat, baseLng],
+      [baseLat + 0.003, baseLng + 0.004],
+      [baseLat + 0.007, baseLng + 0.009],
+      [baseLat + 0.012, baseLng + 0.015],
+      [baseLat + 0.016, baseLng + 0.021],
+      [baseLat + 0.011, baseLng + 0.028],
+      [baseLat + 0.006, baseLng + 0.022],
+      [baseLat + 0.002, baseLng + 0.012],
+    ];
 
     simIntervalRef.current = setInterval(() => {
       const idx = simStepRef.current % trajectory.length;
       const [simLat, simLng] = trajectory[idx];
-      // realistic transit road speed: ~38 km/h (10.5 m/s)
-      const simSpeed = 10.5;
+      const simSpeed = 10.5; // ~38 km/h
 
       sendGpsLocation(simLat, simLng, simSpeed);
       simStepRef.current += 1;
@@ -174,30 +161,30 @@ export default function DriverDashboard({ user }) {
     setIsSimulating(false);
   };
 
-  // Start Trip
+  // Start Bus Trip
   const handleStartTrip = async () => {
     try {
       setErrorMessage('');
       const trip = await apiRequest('/driver/trip/start', 'POST');
       setActiveTrip(trip);
-      setStatusMessage('Trip started! Live GPS broadcasting is active on assigned route.');
+      setStatusMessage('Bus started! Live GPS broadcasting is active for your bus group.');
       startGpsWatch(); // physical phone GPS
-      startSimulation(); // road trajectory simulation
+      startSimulation(); // simulated transit movement
     } catch (err) {
       setErrorMessage(err.message);
     }
   };
 
-  // End Trip
+  // End Bus Trip
   const handleEndTrip = async () => {
-    if (!window.confirm('Are you sure you want to end this trip route?')) return;
+    if (!window.confirm('Are you sure you want to stop this bus trip?')) return;
     try {
       setErrorMessage('');
       await apiRequest('/driver/trip/end', 'POST');
       setActiveTrip(null);
       stopGpsWatch();
       stopSimulation();
-      setStatusMessage('Trip ended successfully. Bus marked as idle.');
+      setStatusMessage('Bus stopped successfully. Bus is now marked as idle.');
       loadDriverData();
     } catch (err) {
       setErrorMessage(err.message);
@@ -269,32 +256,32 @@ export default function DriverDashboard({ user }) {
               <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider ${
                 activeTrip ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-300'
               }`}>
-                {activeTrip ? 'Trip In Progress' : 'Idle'}
+                {activeTrip ? 'Bus Started • Live' : 'Bus Idle'}
               </span>
             </div>
             <p className="text-xs text-emerald-200 mt-0.5">
-              Assigned Route: <span className="font-semibold text-white">{bus.route?.name}</span>
+              Bus Group: <span className="font-semibold text-white">{bus.name}</span>
             </p>
           </div>
         </div>
 
-        {/* Action Button: Start or End Trip */}
+        {/* Action Button: Start or Stop Bus */}
         <div>
           {!activeTrip ? (
             <button
               onClick={handleStartTrip}
-              className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-6 py-3.5 text-sm font-black text-white shadow-lg hover:bg-emerald-600 transition-all active:scale-95"
+              className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-7 py-4 text-sm font-black text-white shadow-xl hover:bg-emerald-600 transition-all active:scale-95 animate-pulse"
             >
-              <Play className="h-4 w-4 fill-white" />
-              START TRIP ROUTE
+              <Play className="h-5 w-5 fill-white" />
+              START BUS
             </button>
           ) : (
             <button
               onClick={handleEndTrip}
-              className="inline-flex items-center gap-2 rounded-2xl bg-red-600 px-6 py-3.5 text-sm font-black text-white shadow-lg hover:bg-red-700 transition-all active:scale-95"
+              className="inline-flex items-center gap-2 rounded-2xl bg-red-600 px-7 py-4 text-sm font-black text-white shadow-xl hover:bg-red-700 transition-all active:scale-95"
             >
-              <Square className="h-4 w-4 fill-white" />
-              END TRIP
+              <Square className="h-5 w-5 fill-white" />
+              STOP / END BUS
             </button>
           )}
         </div>
@@ -496,30 +483,50 @@ export default function DriverDashboard({ user }) {
             </form>
           </div>
 
-          {/* Upcoming Stops Checklist */}
+          {/* Registered Group Students Roster */}
           <div className="card p-5">
-            <h3 className="font-bold text-sm text-navy-900 mb-3 flex items-center gap-2">
-              <MapPin className="h-4 w-4 text-emerald-500" />
-              Route Stops Checklist ({stops.length})
+            <h3 className="font-bold text-sm text-navy-900 mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-sky-600" />
+                <span>Group Students ({driverData.students?.length || 0})</span>
+              </div>
+              <span className="text-[10px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200">
+                Authorized Commuters
+              </span>
             </h3>
 
-            <div className="space-y-2">
-              {stops.map((stop, idx) => (
-                <div
-                  key={stop.id || idx}
-                  className="flex items-center justify-between rounded-xl bg-slate-50 p-2.5 text-xs border border-slate-100"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-md bg-navy-800 text-[10px] font-black text-white">
-                      {idx + 1}
-                    </span>
-                    <span className="font-semibold text-slate-800">{stop.name}</span>
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              {driverData.students && driverData.students.length > 0 ? (
+                driverData.students.map((st, idx) => (
+                  <div
+                    key={st.id || idx}
+                    className="flex items-center justify-between rounded-xl bg-slate-50 p-2.5 text-xs border border-slate-100"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700 font-bold text-[11px]">
+                        {st.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="font-bold text-slate-800">{st.name}</p>
+                        <p className="text-[10px] text-slate-400">{st.email}</p>
+                      </div>
+                    </div>
+                    {st.phone && (
+                      <a
+                        href={`tel:${st.phone}`}
+                        className="rounded-lg bg-emerald-500 p-1.5 text-white hover:bg-emerald-600 transition-colors"
+                        title="Call Student"
+                      >
+                        <Phone className="h-3 w-3" />
+                      </a>
+                    )}
                   </div>
-                  <span className="text-[10px] text-slate-400">
-                    {idx === 0 ? 'Start' : idx === stops.length - 1 ? 'Campus' : 'Pickup'}
-                  </span>
-                </div>
-              ))}
+                ))
+              ) : (
+                <p className="text-center py-4 text-xs text-slate-400">
+                  No students assigned to this bus group yet.
+                </p>
+              )}
             </div>
           </div>
         </div>
